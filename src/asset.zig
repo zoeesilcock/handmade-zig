@@ -230,6 +230,10 @@ pub const Assets = struct {
     error_stream_memory: MemoryArena,
     error_stream: Stream,
 
+    null_hha_asset: HHAAsset = .{},
+    null_hha_bitmap: HHABitmap = .{},
+    null_hha_font: HHAFont = .{},
+
     audio_channel_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
     art_block_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
     art_head_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
@@ -481,6 +485,14 @@ pub const Assets = struct {
             import.synchronizeAssetFileChanges(assets, false);
         }
 
+        if (assets.asset_count == 1) {
+            // We found no assets.
+            shared.platform.errorMessage(
+                .NonFatal,
+                "WARNING: No assets found. Ensure the starting directory is correct.",
+            );
+        }
+
         return assets;
     }
 
@@ -596,11 +608,11 @@ pub const Assets = struct {
         type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
-    ) ?u32 {
+    ) u32 {
         TimedBlock.beginFunction(@src(), .GetBestMatchAsset);
         defer TimedBlock.endFunction(@src(), .GetBestMatchAsset);
 
-        var result: ?u32 = null;
+        var result: u32 = 0;
         var best_match: f32 = 0;
 
         var asset_index: u32 = self.first_asset_of_type[@intFromEnum(type_id)];
@@ -792,18 +804,23 @@ pub const Assets = struct {
     }
 
     pub fn getBitmap(self: *Assets, id: BitmapId) RendererTexture {
-        const asset: ?*Asset = self.getAsset(id.value);
-        std.debug.assert(id.value == 0 or asset.?.hha.type == .Bitmap);
+        var result: RendererTexture = .empty;
 
-        const result: RendererTexture = asset.?.handle.texture_handle;
+        if (self.getAsset(id.value)) |asset| {
+            std.debug.assert(id.value == 0 or asset.hha.type == .Bitmap);
 
-        if (result.isValid()) {
-            const info = &asset.?.hha.info.bitmap;
-            shared.dlistRemove(&asset.?.lru);
-            if (self.dimensionsRequireSpecialTexture(@intCast(info.dim[0]), @intCast(info.dim[1]))) {
-                shared.dlistInsertLast(&self.special_texture_lru_sentinel, &asset.?.lru);
-            } else {
-                shared.dlistInsertLast(&self.regular_texture_lru_sentinel, &asset.?.lru);
+            if (std.meta.activeTag(asset.handle) == .texture_handle) {
+                result = asset.handle.texture_handle;
+            }
+
+            if (result.isValid()) {
+                const info = &asset.hha.info.bitmap;
+                shared.dlistRemove(&asset.lru);
+                if (self.dimensionsRequireSpecialTexture(@intCast(info.dim[0]), @intCast(info.dim[1]))) {
+                    shared.dlistInsertLast(&self.special_texture_lru_sentinel, &asset.lru);
+                } else {
+                    shared.dlistInsertLast(&self.regular_texture_lru_sentinel, &asset.lru);
+                }
             }
         }
 
@@ -811,18 +828,19 @@ pub const Assets = struct {
     }
 
     pub fn getBitmapInfo(self: *Assets, id: BitmapId) *HHABitmap {
-        const asset: ?*Asset = self.getAsset(id.value);
-        std.debug.assert(id.value == 0 or asset.?.hha.type == .Bitmap);
-        return &asset.?.hha.info.bitmap;
+        var result: *HHABitmap = &self.null_hha_bitmap;
+        if (self.getAsset(id.value)) |asset| {
+            std.debug.assert(id.value == 0 or asset.hha.type == .Bitmap);
+            result = &asset.hha.info.bitmap;
+        }
+        return result;
     }
 
     pub fn getFirstBitmap(self: *Assets, type_id: AssetBasicCategory) ?BitmapId {
         var result: ?BitmapId = null;
-
         if (self.getFirstAsset(type_id)) |slot_id| {
             result = BitmapId{ .value = slot_id };
         }
-
         return result;
     }
 
@@ -841,20 +859,18 @@ pub const Assets = struct {
         type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
-    ) ?BitmapId {
-        var result: ?BitmapId = null;
-
-        if (self.getBestMatchAsset(type_id, match_vector, weight_vector)) |slot_id| {
-            result = BitmapId{ .value = slot_id };
-        }
-
+    ) BitmapId {
+        const result: BitmapId = BitmapId{ .value = self.getBestMatchAsset(type_id, match_vector, weight_vector) };
         return result;
     }
 
     pub fn getSoundInfo(self: *Assets, id: SoundId) *HHAAsset {
-        const asset: ?*Asset = self.getAsset(id.value);
-        std.debug.assert(asset.?.hha.type == .Sound);
-        return &asset.?.hha;
+        var result: *HHAAsset = &self.null_hha_asset;
+        if (self.getAsset(id.value)) |asset| {
+            std.debug.assert(asset.hha.type == .Sound);
+            result = &asset.hha;
+        }
+        return result;
     }
 
     pub fn prefetchSound(
@@ -960,22 +976,23 @@ pub const Assets = struct {
     }
 
     pub fn getSoundSamples(self: *Assets, id: SoundId) ?[*]i16 {
-        const asset: *Asset = self.getAsset(id.value).?;
-        std.debug.assert(id.value == 0 or asset.hha.type == .Sound);
-
         var result: ?[*]i16 = null;
-        if (asset.state == @intFromEnum(AssetState.Loaded)) {
-            const ranges: AssetSoundBufferRanges = self.getSoundBufferRanges();
-            const buffer_index: u64 = asset.handle.loaded_at_sound_buffer_index;
-            if (buffer_index >= ranges.sound_buffer_lru_index) {
-                result = @ptrCast(@alignCast(self.getSoundBufferMemory(buffer_index)));
-            } else if (buffer_index >= ranges.sound_buffer_base_index) {
-                const data_size: u32 = asset.hha.data_size;
-                const sound_memory: SoundBufferMemory = self.reserveSoundMemory(data_size);
-                const source = self.getSoundBufferMemory(buffer_index);
-                result = @ptrCast(@alignCast(sound_memory.pointer));
-                _ = shared.copy(data_size, source, result.?);
-                asset.handle.loaded_at_sound_buffer_index = sound_memory.buffer_index;
+        if (self.getAsset(id.value)) |asset| {
+            if (asset.state == @intFromEnum(AssetState.Loaded)) {
+                std.debug.assert(id.value == 0 or asset.hha.type == .Sound);
+
+                const ranges: AssetSoundBufferRanges = self.getSoundBufferRanges();
+                const buffer_index: u64 = asset.handle.loaded_at_sound_buffer_index;
+                if (buffer_index >= ranges.sound_buffer_lru_index) {
+                    result = @ptrCast(@alignCast(self.getSoundBufferMemory(buffer_index)));
+                } else if (buffer_index >= ranges.sound_buffer_base_index) {
+                    const data_size: u32 = asset.hha.data_size;
+                    const sound_memory: SoundBufferMemory = self.reserveSoundMemory(data_size);
+                    const source = self.getSoundBufferMemory(buffer_index);
+                    result = @ptrCast(@alignCast(sound_memory.pointer));
+                    _ = shared.copy(data_size, source, result.?);
+                    asset.handle.loaded_at_sound_buffer_index = sound_memory.buffer_index;
+                }
             }
         }
 
@@ -1024,13 +1041,8 @@ pub const Assets = struct {
         type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
-    ) ?SoundId {
-        var result: ?SoundId = null;
-
-        if (self.getBestMatchAsset(type_id, match_vector, weight_vector)) |slot_id| {
-            result = SoundId{ .value = slot_id };
-        }
-
+    ) SoundId {
+        const result: SoundId = SoundId{ .value = self.getBestMatchAsset(type_id, match_vector, weight_vector) };
         return result;
     }
 
@@ -1101,25 +1113,26 @@ pub const Assets = struct {
     }
 
     pub fn getFont(self: *Assets, id: FontId) ?*LoadedFont {
-        const asset: ?*Asset = self.getAsset(id.value);
-        std.debug.assert(id.value == 0 or asset.?.hha.type == .Font);
-
         var result: ?*LoadedFont = null;
-
-        if (asset.?.state == @intFromEnum(AssetState.Loaded)) {
-            if (asset.?.handle != .font) {
-                asset.?.handle = .{ .font = .{} };
+        if (self.getAsset(id.value)) |asset| {
+            std.debug.assert(id.value == 0 or asset.hha.type == .Font);
+            if (asset.state == @intFromEnum(AssetState.Loaded)) {
+                if (asset.handle != .font) {
+                    asset.handle = .{ .font = .{} };
+                }
+                result = &asset.handle.font;
             }
-            result = &asset.?.handle.font;
         }
-
         return result;
     }
 
     pub fn getFontInfo(self: *Assets, id: FontId) *HHAFont {
-        const asset: ?*Asset = self.getAsset(id.value);
-        std.debug.assert(asset.?.hha.type == .Font);
-        return &asset.?.hha.info.font;
+        var result: *HHAFont = &self.null_hha_font;
+        if (self.getAsset(id.value)) |asset| {
+            std.debug.assert(asset.hha.type == .Font or asset.hha.type == .None);
+            result = &asset.hha.info.font;
+        }
+        return result;
     }
 
     pub fn getBestMatchFont(
@@ -1127,15 +1140,8 @@ pub const Assets = struct {
         type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
-    ) ?FontId {
-        var result: ?FontId = null;
-
-        if (self.getBestMatchAsset(type_id, match_vector, weight_vector)) |slot_id| {
-            result = FontId{ .value = slot_id };
-        }
-
-        // result = FontId{ .value = 1 };
-
+    ) FontId {
+        const result: FontId = FontId{ .value = self.getBestMatchAsset(type_id, match_vector, weight_vector) };
         return result;
     }
 };

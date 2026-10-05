@@ -317,7 +317,7 @@ pub fn updateAndRenderTitleScreen(
             match_vector.e[AssetTagId.LayerIndex.toInt()] = 1;
             const layer_image = render_group.assets.getBestMatchBitmap(.Plate, &match_vector, &weight_vector);
 
-            const bitmap_info = render_group.assets.getBitmapInfo(layer_image.?);
+            const bitmap_info = render_group.assets.getBitmapInfo(layer_image);
             const align_percentage: Vector2 = bitmap_info.getFirstAlign();
             asset_rendering.pushBitmapId(
                 &render_group,
@@ -492,7 +492,7 @@ fn renderLayeredScene(
 
                 _ = offset_position.setZ(position.z() - camera_offset.z());
 
-                const bitmap_info = render_group.assets.getBitmapInfo(layer_image.?);
+                const bitmap_info = render_group.assets.getBitmapInfo(layer_image);
                 const align_percentage: Vector2 = bitmap_info.getFirstAlign();
                 asset_rendering.pushBitmapId(
                     render_group,

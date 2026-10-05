@@ -67,7 +67,7 @@ pub const DevUI = struct {
         var weight_vector = asset.AssetVector{};
         match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
         weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
-        self.font_id = assets.getBestMatchFont(.Font, &match_vector, &weight_vector).?;
+        self.font_id = assets.getBestMatchFont(.Font, &match_vector, &weight_vector);
 
         self.font_info = assets.getFontInfo(self.font_id);
         self.font_scale = 1;

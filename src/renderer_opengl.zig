@@ -299,8 +299,6 @@ const ZBiasProgram = extern struct {
 
 const ResolveMultisampleProgram = extern struct {
     common: OpenGLProgramCommon,
-
-    sample_count_id: i32 = 0,
 };
 
 const MultiGridLightDownProgram = extern struct {
@@ -494,6 +492,12 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     open_gl.current_settings.multisampling_hint = true;
     open_gl.current_settings.pixelation_hint = false;
     open_gl.current_settings.multisample_debug = false;
+
+    if (INTERNAL) {
+        open_gl.current_settings.request_vsync = false;
+    } else {
+        open_gl.current_settings.request_vsync = true;
+    }
 
     open_gl.shader_sim_tex_read_srgb = true;
     open_gl.shader_sim_tex_write_srgb = true;
@@ -1034,54 +1038,59 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         \\  gl_Position = VertP;
         \\}
     ;
-    const fragment_code =
+    var fragment_code: [4096]u8 = undefined;
+    const fragment_code_length = shared.formatString(
+        fragment_code.len,
+        &fragment_code,
         \\// Fragment code
         \\#define DepthThreshold 0.001f
+        \\#define SampleCount %u
+        \\#define InvSampleCount %f
+        \\
         \\uniform sampler2DMS DepthSampler;
         \\uniform sampler2DMS ColorSampler;
-        \\uniform int SampleCount;
         \\
         \\out vec4 BlendUnitColor;
         \\
         \\void main(void)
         \\{
         \\#if !MultisampleDebug
-        \\  float DepthMax = 0.0f;
-        \\  float DepthMin = 1.0f;
-        \\  for (int SampleIndex = 0;
-        \\       SampleIndex < SampleCount;
-        \\       ++SampleIndex)
+        \\  // TODO: Can we replace this with a check for if a particular location in a multisample texture has all one
+        \\  // sample or actually contains multiple samples?
+        \\  if (true)
         \\  {
-        \\    float Depth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r;
-        \\    DepthMin = min(DepthMin, Depth);
-        \\    DepthMax = max(DepthMax, Depth);
-        \\  }
+        \\    float DepthMax = 0.0f;
+        \\    float DepthMin = 1.0f;
+        \\    vec4 CombinedColor = vec4(0.0, 0.0, 0.0, 0.0);
+        \\    for (int SampleIndex = 0;
+        \\         SampleIndex < SampleCount;
+        \\         ++SampleIndex)
+        \\    {
+        \\      float Depth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r;
+        \\      DepthMin = min(DepthMin, Depth);
+        \\      DepthMax = max(DepthMax, Depth);
         \\
-        \\  gl_FragDepth = 0.5 * (DepthMin + DepthMax);
-        \\
-        \\  vec4 CombinedColor = vec4(0.0, 0.0, 0.0, 0.0);
-        \\  vec4 CombinedEmission = vec4(0.0, 0.0, 0.0, 0.0);
-        \\  vec4 CombinedNormalPosition = vec4(0.0, 0.0, 0.0, 0.0);
-        \\  for (int SampleIndex = 0;
-        \\       SampleIndex < SampleCount;
-        \\       ++SampleIndex)
-        \\  {
-        \\    float Depth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r;
-        \\    vec4 Color = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), SampleIndex);
+        \\      vec4 Color = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), SampleIndex);
         \\#if ShaderSimTexReadSRGB
-        \\    Color.rgb *= Color.rgb;
+        \\      Color.rgb *= Color.rgb;
         \\#endif
-        \\    CombinedColor += Color;
+        \\      CombinedColor += Color;
+        \\    }
+        \\
+        \\    vec4 SurfaceReflect = InvSampleCount * CombinedColor;
+        \\#if ShaderSimTexWriteSRGB
+        \\    SurfaceReflect.rgb = sqrt(SurfaceReflect.rgb);
+        \\#endif
+        \\
+        \\    gl_FragDepth = 0.5 * (DepthMin + DepthMax);
+        \\    BlendUnitColor = SurfaceReflect;
+        \\  }
+        \\  else
+        \\  {
+        \\    gl_FragDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
+        \\    BlendUnitColor = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), 0);
         \\  }
         \\
-        \\  float InvSampleCount = 1.0 / float(SampleCount);
-        \\  vec4 SurfaceReflect = InvSampleCount * CombinedColor;
-        \\
-        \\#if ShaderSimTexWriteSRGB
-        \\  SurfaceReflect.rgb = sqrt(SurfaceReflect.rgb);
-        \\#endif
-        \\
-        \\  BlendUnitColor = SurfaceReflect;
         \\#else
         \\  int UniqueCount = 1;
         \\  for (int IndexA = 1;
@@ -1120,17 +1129,21 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         \\  }
         \\#endif
         \\}
-    ;
+    ,
+        .{
+            open_gl.max_multi_sample_count,
+            1.0 / @as(f32, @floatFromInt(open_gl.max_multi_sample_count)),
+        },
+    );
 
-    const program_handle = createProgram(
+    _ = createProgram(
         @ptrCast(defines[0..defines_length]),
         shader_header_code,
         vertex_code,
-        fragment_code,
+        @ptrCast(fragment_code[0..fragment_code_length]),
         &program.common,
     );
     linkSamplers(&program.common, &.{ "DepthSampler", "ColorSampler", "EmissionSampler", "NormalPositionSampler" });
-    program.sample_count_id = platform.optGLGetUniformLocation.?(program_handle, "SampleCount");
 }
 
 fn compileFinalStretchProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
@@ -1199,9 +1212,8 @@ fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *align(1) RenderSetup, al
 }
 
 fn useResolveMultisampleProgramBegin(open_gl: *OpenGL, program: *ResolveMultisampleProgram) void {
+    _ = open_gl;
     useProgramBegin(&program.common);
-
-    platform.optGLUniform1i.?(program.sample_count_id, open_gl.max_multi_sample_count);
 }
 
 fn useMultiGridLightDownProgramBegin(program: *MultiGridLightDownProgram, source_uv_step: Vector2) void {

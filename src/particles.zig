@@ -65,7 +65,7 @@ pub fn initParticleCache(cache: *ParticleCache, assets: *Assets) void {
     weight_vector.e[AssetTagId.Particle.toInt()] = 1;
     weight_vector.e[AssetTagId.Smoke.toInt()] = 1;
 
-    cache.fire_system.bitmap_id = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector).?;
+    cache.fire_system.bitmap_id = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector);
 }
 
 pub fn updateAndRenderParticleSystem(

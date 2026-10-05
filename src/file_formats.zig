@@ -420,11 +420,11 @@ pub const HHAFontGlyph = extern struct {
 };
 
 pub const HHAFont = extern struct {
-    one_past_highest_code_point: u32 align(1),
-    glyph_count: u32 align(1),
-    ascender_height: f32 align(1),
-    descender_height: f32 align(1),
-    external_leading: f32 align(1),
+    one_past_highest_code_point: u32 align(1) = 0,
+    glyph_count: u32 align(1) = 0,
+    ascender_height: f32 align(1) = 0,
+    descender_height: f32 align(1) = 0,
+    external_leading: f32 align(1) = 0,
 
     // Data looks like this:
     //

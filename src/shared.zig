@@ -989,6 +989,11 @@ pub const PlatformMemoryBlock = extern struct {
     arena_prev: ?*PlatformMemoryBlock = null,
 };
 
+pub const PlatformErrorType = enum(u32) {
+    Fatal,
+    NonFatal,
+};
+
 pub const DebugExecutingProcess = extern struct {
     os_handle: u64 = 0,
 };
@@ -1023,6 +1028,7 @@ const writeDataToFileType: type = fn (handle: *PlatformFileHandle, offset: u64, 
 const atomicReplaceFileContentsType: type = fn (info: *PlatformFileInfo, size: u64, source: *anyopaque) callconv(.c) bool;
 const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) bool;
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.c) void;
+const errorMessageType: type = fn (error_type: PlatformErrorType, message: [*:0]const u8) callconv(.c) void;
 
 const allocateMemoryType: type = fn (size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBlock;
 const deallocateMemoryType: type = fn (memory: ?*PlatformMemoryBlock) callconv(.c) void;
@@ -1049,6 +1055,7 @@ pub const Platform = if (INTERNAL) extern struct {
     atomicReplaceFileContents: *const atomicReplaceFileContentsType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,
+    errorMessage: *const errorMessageType = undefined,
 
     allocateMemory: *const allocateMemoryType = undefined,
     deallocateMemory: *const deallocateMemoryType = undefined,
@@ -1070,6 +1077,7 @@ pub const Platform = if (INTERNAL) extern struct {
     atomicReplaceFileContents: *const atomicReplaceFileContentsType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,
+    errorMessage: *const errorMessageType = undefined,
 
     allocateMemory: *const allocateMemoryType = undefined,
     deallocateMemory: *const deallocateMemoryType = undefined,

@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 const FORCE_RELEASE_MODE = true;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
-const SLOW_DEFAULT = true;
+const SLOW_DEFAULT = false;
 const EMIT_ASM = false;
 
 const Package = enum {

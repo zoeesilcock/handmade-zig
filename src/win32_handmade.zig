@@ -137,6 +137,8 @@ const Win32State = extern struct {
     one_past_last_exe_file_name_slash: usize = 0,
 
     temp_dll_number: u32 = 0,
+
+    default_window_handle: win32.HWND = undefined,
 };
 
 const MemoryBlockLoopingFlag = enum(u64) {
@@ -263,9 +265,9 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
     }
 
     var find_data: win32.WIN32_FIND_DATAW = undefined;
-    var find_handle = win32.FindFirstFileW(wildcard, &find_data);
+    const find_handle = win32.FindFirstFileW(wildcard, &find_data);
 
-    while (@as(*anyopaque, @ptrCast(&find_handle)) != win32.INVALID_HANDLE_VALUE) {
+    while (find_handle != -1) {
         const info: *shared.PlatformFileInfo = allocateFileInfo(&result, @ptrCast(&find_data));
 
         const base_name_begin: [*:0]const u16 = @ptrCast(&find_data.cFileName);
@@ -523,6 +525,24 @@ fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) ca
     }
 
     file_handle.no_errors = false;
+}
+
+fn errorMessage(error_type: shared.PlatformErrorType, message: [*:0]const u8) callconv(.c) void {
+    var caption: [:0]const u8 = "Handmade Hero Warning";
+    var message_box_type = win32.MB_OK;
+    if (error_type == .Fatal) {
+        message_box_type.ICONHAND = 1;
+        caption = "Handmade Hero Fatal Error";
+    } else {
+        message_box_type.ICONHAND = 1;
+        message_box_type.ICONQUESTION = 1;
+    }
+
+    _ = win32.MessageBoxExA(global_state.default_window_handle, message, caption, message_box_type, 0);
+
+    if (error_type == .Fatal) {
+        win32.ExitProcess(1);
+    }
 }
 
 fn isInLoop() bool {
@@ -2014,6 +2034,7 @@ pub export fn wWinMain(
         .writeDataToFile = writeDataToFile,
         .atomicReplaceFileContents = atomicReplaceFileContents,
         .fileError = fileError,
+        .errorMessage = errorMessage,
 
         .allocateMemory = allocateMemory,
         .deallocateMemory = deallocateMemory,
@@ -2067,6 +2088,8 @@ pub export fn wWinMain(
         );
 
         if (opt_window_handle) |window_handle| {
+            global_state.default_window_handle = window_handle;
+
             if (!INTERNAL) {
                 toggleFullscreen(window_handle);
             }
@@ -2511,13 +2534,13 @@ pub export fn wWinMain(
                     last_counter = end_counter;
                 }
             } else {
-                win32.OutputDebugStringA("Failed to allocate memory.\n");
+                errorMessage(.Fatal, "Unable to allocate memory for sound samples.");
             }
         } else {
-            win32.OutputDebugStringA("Window handle is null.\n");
+            errorMessage(.Fatal, "Unable to open game window.");
         }
     } else {
-        win32.OutputDebugStringA("Register class failed.\n");
+        errorMessage(.Fatal, "Unable to register game window handle.");
     }
 
     win32.ExitProcess(0);

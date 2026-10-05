@@ -362,9 +362,9 @@ fn executeBrainHero(
                         weight_vector.e[asset.AssetTagId.Bloop.toInt()] = 1;
                         weight_vector.e[asset.AssetTagId.ChannelIndex.toInt()] = 1;
 
-                        if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |bloop_id| {
-                            _ = state.audio_state.playSound(bloop_id);
-                        }
+                        _ = state.audio_state.playSound(
+                            state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector),
+                        );
                     }
                 } else if (glove.movement_mode != .AngleAttackSwipe) {
                     glove.movement_mode = .Floating;

@@ -30,6 +30,7 @@ pub const requested = if (INTERNAL) debug.requested else debug.requestedStub;
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
+const SLOW = shared.SLOW;
 
 pub const MAX_DEBUG_REGIONS_PER_FRAME = 2 * 4096;
 
@@ -333,14 +334,38 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         };
     }
 } else extern struct {
+    pub fn debugName(
+        comptime source: std.builtin.SourceLocation,
+        comptime counter: ?@TypeOf(.EnumLiteral),
+        comptime name: []const u8,
+    ) [*:0]const u8 {
+        _ = source;
+        _ = counter;
+        _ = name;
+    }
     pub fn record(event_type: DebugType, block: [*:0]const u8) *DebugEvent {
         _ = event_type;
         _ = block;
         return undefined;
     }
+    pub fn setValue(self: *DebugEvent, source: anytype, dest: anytype) void {
+        _ = self;
+        _ = source;
+        _ = dest;
+    }
+    pub fn matches(a: *DebugEvent, b: *DebugEvent) bool {
+        _ = a;
+        _ = b;
+    }
+    pub fn typeString(self: *DebugEvent) []const u8 {
+        _ = self;
+    }
+    pub fn prefixString(self: *DebugEvent) []const u8 {
+        _ = self;
+    }
 };
 
-pub const TimedBlock = if (INTERNAL) struct {
+pub const TimedBlock = if (INTERNAL and SLOW) struct {
     pub fn beginBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         begin(DebugEvent.debugName(source, counter, @tagName(counter)), @tagName(counter));
     }
@@ -407,13 +432,24 @@ pub const TimedBlock = if (INTERNAL) struct {
         _ = counter;
     }
 
-    pub fn frameMarker(source: std.builtin.SourceLocation, counter: @TypeOf(.EnumLiteral), seconds_elapsed: f32) void {
-        _ = source;
-        _ = counter;
-        _ = seconds_elapsed;
+    pub fn frameMarker(
+        comptime source: std.builtin.SourceLocation,
+        comptime counter: @TypeOf(.EnumLiteral),
+        seconds_elapsed: f32,
+    ) void {
+        var event = DebugEvent.record(
+            .FrameMarker,
+            DebugEvent.debugName(source, counter, "Frame Marker"),
+            "Frame Marker",
+        );
+        event.data = .{ .f32 = seconds_elapsed };
     }
 
-    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: @TypeOf(.EnumLiteral), hit_count: u32) void {
+    pub fn beginWithCount(
+        comptime source: std.builtin.SourceLocation,
+        comptime counter: @TypeOf(.EnumLiteral),
+        hit_count: u32,
+    ) void {
         _ = source;
         _ = counter;
         _ = hit_count;

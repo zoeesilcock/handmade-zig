@@ -826,41 +826,43 @@ fn stompOnEntity(
 }
 
 fn drawGroundCover(entity: *Entity, render_group: *RenderGroup) void {
-    const assets: *Assets = render_group.assets;
+    if (false) {
+        const assets: *Assets = render_group.assets;
 
-    var cover_index: u32 = 0;
-    while (cover_index < entity.ground_cover_count) : (cover_index += 1) {
-        const cover: *GroundCover = &entity.ground_cover[cover_index];
+        var cover_index: u32 = 0;
+        while (cover_index < entity.ground_cover_count) : (cover_index += 1) {
+            const cover: *GroundCover = &entity.ground_cover[cover_index];
 
-        const texture_handle: RendererTexture = assets.getBitmap(cover.bitmap);
-        if (texture_handle.isValid()) {
-            const bitmap_info: *HHABitmap = assets.getBitmapInfo(cover.bitmap);
-            const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(bitmap_info, cover.scale);
-            const x_axis: Vector2 = .new(1, 0);
-            const y_axis: Vector2 = .new(0, 1);
-            const align_percentage: Vector2 = .new(0.5, 0);
+            const texture_handle: RendererTexture = assets.getBitmap(cover.bitmap);
+            if (texture_handle.isValid()) {
+                const bitmap_info: *HHABitmap = assets.getBitmapInfo(cover.bitmap);
+                const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(bitmap_info, cover.scale);
+                const x_axis: Vector2 = .new(1, 0);
+                const y_axis: Vector2 = .new(0, 1);
+                const align_percentage: Vector2 = .new(0.5, 0);
 
-            const sprite: SpriteValues = .forUpright(
-                render_group,
-                world_dim,
-                align_percentage,
-                x_axis,
-                y_axis,
-                null,
-            );
+                const sprite: SpriteValues = .forUpright(
+                    render_group,
+                    world_dim,
+                    align_percentage,
+                    x_axis,
+                    y_axis,
+                    null,
+                );
 
-            render_group.pushSprite(
-                texture_handle,
-                sprite.min_position.plus(entity.position).plus(cover.position),
-                sprite.scaled_x_axis,
-                sprite.scaled_y_axis,
-                cover.color.toColor(1),
-                null,
-                null,
-            );
-        } else {
-            assets.loadBitmap(cover.bitmap);
-            render_group.missing_resource_count += 1;
+                render_group.pushSprite(
+                    texture_handle,
+                    sprite.min_position.plus(entity.position).plus(cover.position),
+                    sprite.scaled_x_axis,
+                    sprite.scaled_y_axis,
+                    cover.color.toColor(1),
+                    null,
+                    null,
+                );
+            } else {
+                assets.loadBitmap(cover.bitmap);
+                render_group.missing_resource_count += 1;
+            }
         }
     }
 }
@@ -950,7 +952,7 @@ pub fn fillUnpackedEntity(entity: *Entity, sim_region: *SimRegion, assets: *Asse
                 );
 
                 match_vector.e[AssetTagId.Variant.toInt()] = cover_series.randomUnilateral();
-                cover.bitmap = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector).?;
+                cover.bitmap = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector);
                 cover.position = entity.collision_volume.pointFromUVW(random_uvw);
                 cover.color = .new(1, 1, 1);
                 cover.scale = 0.3;
