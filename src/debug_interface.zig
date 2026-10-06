@@ -304,14 +304,14 @@ pub const DebugEvent = if (INTERNAL) extern struct {
                 switch (@typeInfo(@TypeOf(source))) {
                     .@"enum" => |enum_info| {
                         if (guids_match) {
-                            if (shared.global_debug_table.edit_event.data.Enum >= enum_info.fields.len) {
+                            if (shared.global_debug_table.edit_event.data.Enum >= enum_info.field_names.len) {
                                 shared.global_debug_table.edit_event.data.Enum = 0;
                             }
-                            dest.* = @enumFromInt(shared.global_debug_table.edit_event.data.Enum);
+                            dest.* = @fromBackingInt(shared.global_debug_table.edit_event.data.Enum);
                         }
 
                         self.event_type = .Enum;
-                        self.data = .{ .Enum = @intFromEnum(dest.*) };
+                        self.data = .{ .Enum = @backingInt(dest.*) };
                     },
                     else => {},
                 }
@@ -498,9 +498,9 @@ pub const DebugInterface = if (INTERNAL) struct {
     }
 
     pub fn debugStruct(comptime source: std.builtin.SourceLocation, parent: anytype) void {
-        const fields = std.meta.fields(@TypeOf(parent.*));
-        inline for (fields) |field| {
-            debugValue(source, runtimeFieldPointer(parent, field.name), field.name);
+        const field_names = @typeInfo(@TypeOf(parent.*)).@"struct".field_names;
+        inline for (field_names) |field_name| {
+            debugValue(source, runtimeFieldPointer(parent, field_name), field_name);
         }
     }
 
@@ -520,7 +520,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         const guid = DebugEvent.debugName(source, null, @tagName(value));
         var event = DebugEvent.record(.Unknown, guid, @ptrCast(@tagName(value)));
 
-        event.data.u32 = @intFromEnum(value);
+        event.data.u32 = @backingInt(value);
         event.event_type = .SetHUD;
     }
 

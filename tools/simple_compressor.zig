@@ -416,8 +416,8 @@ fn readEntireFileIntoMemory(file_name: []const u8, allocator: std.mem.Allocator,
     return result;
 }
 
-const STAT_COUNT = @typeInfo(StatType).@"enum".fields.len;
-const StatType = enum {
+const STAT_COUNT = @typeInfo(StatType).@"enum".field_names.len;
+const StatType = enum(u32) {
     Literal,
     Repeat,
     Copy,
@@ -463,13 +463,13 @@ fn printStats(stats: *StatGroup) void {
         while (stat_index < STAT_COUNT) : (stat_index += 1) {
             const stat: *Stat = &stats.stats[stat_index];
             if (stat.count > 0) {
-                std.log.info("{s}: {d} {d}", .{ getStatName(@enumFromInt(stat_index)), stat.count, stat.total });
+                std.log.info("{s}: {d} {d}", .{ getStatName(@fromBackingInt(stat_index)), stat.count, stat.total });
             }
         }
     }
 }
 
 fn increment(stats: *StatGroup, stat_type: StatType, value: usize) void {
-    stats.stats[@intFromEnum(stat_type)].count += 1;
-    stats.stats[@intFromEnum(stat_type)].total += value;
+    stats.stats[@backingInt(stat_type)].count += 1;
+    stats.stats[@backingInt(stat_type)].total += value;
 }

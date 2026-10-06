@@ -3,7 +3,7 @@ const math = @import("math.zig");
 const simd = @import("simd.zig");
 const intrinsics = @import("intrinsics.zig");
 
-pub const Series = extern struct {
+pub const Series = struct {
     state: simd.U32_4x,
 
     pub fn seed(opt_seed1: ?u32, opt_seed2: ?u32, opt_seed3: ?u32, opt_seed4: ?u32) Series {

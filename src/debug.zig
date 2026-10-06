@@ -630,7 +630,7 @@ pub const DebugState = struct {
             self.element_hash[index] = result;
 
             var opt_parent_group = parent;
-            if (op & @intFromEnum(ElementAddOp.CreateHierarchy) != 0) {
+            if (op & @backingInt(ElementAddOp.CreateHierarchy) != 0) {
                 var temp: [256:0]u8 = undefined;
                 if (self.getGroupForHierarchicalName(
                     parent orelse self.root_group,
@@ -641,7 +641,7 @@ pub const DebugState = struct {
                 }
             }
 
-            if (op & @intFromEnum(ElementAddOp.AddToGroup) != 0) {
+            if (op & @backingInt(ElementAddOp.AddToGroup) != 0) {
                 if (opt_parent_group) |parent_group| {
                     _ = self.addElementToGroup(parent_group, result.?);
                 }
@@ -935,7 +935,7 @@ pub const DebugState = struct {
                         if (self.getElementFromEvent(
                             event,
                             self.profile_group,
-                            @intFromEnum(ElementAddOp.AddToGroup),
+                            @backingInt(ElementAddOp.AddToGroup),
                         )) |element| {
                             var stored_event: *DebugStoredEvent = self.storeEvent(element, event);
                             stored_event.data = .{ .profile_node = .{} };
@@ -1043,7 +1043,7 @@ pub const DebugState = struct {
                         if (self.getElementFromEvent(
                             event,
                             default_parent_group,
-                            @intFromEnum(ElementAddOp.AddToGroup) | @intFromEnum(ElementAddOp.CreateHierarchy),
+                            @backingInt(ElementAddOp.AddToGroup) | @backingInt(ElementAddOp.CreateHierarchy),
                         )) |element| {
                             element.original_guid = event.guid;
                             _ = self.storeEvent(element, event);
@@ -1176,7 +1176,7 @@ const DebugVariableToTextFlag = enum(u32) {
     Value = 0x100,
 
     pub fn toInt(self: DebugVariableToTextFlag) u32 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 
     pub fn declarationFlags() u32 {
@@ -1337,7 +1337,7 @@ pub const DebugElement = struct {
                 var hud_function: ?*DebugElement = null;
                 var buf: [buffer_size]u8 = undefined;
                 var function_name: [*:0]const u8 = undefined;
-                function_name = std.fmt.bufPrintZ(&buf, "(unknown)", .{}) catch "(uknown)";
+                function_name = std.fmt.bufPrintSentinel(&buf, "(unknown)", .{}, 0) catch "(uknown)";
 
                 const opt_oldest_event: ?*DebugStoredEvent =
                     self.frames[debug_state.viewing_frame_ordinal].oldest_event;
@@ -2355,17 +2355,17 @@ fn drawDebugElement(
             layout.booleanButton(
                 .fromSlice("Threads"),
                 element.type == .ThreadIntervalGraph,
-                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ThreadIntervalGraph)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @backingInt(DebugType.ThreadIntervalGraph)),
             );
             layout.booleanButton(
                 .fromSlice("Frames"),
                 element.type == .FrameBarGraph,
-                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.FrameBarGraph)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @backingInt(DebugType.FrameBarGraph)),
             );
             layout.booleanButton(
                 .fromSlice("Clocks"),
                 element.type == .TopClocksList,
-                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.TopClocksList)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @backingInt(DebugType.TopClocksList)),
             );
             layout.endRow();
 
@@ -2493,17 +2493,17 @@ fn drawDebugElement(
             layout.booleanButton(
                 .fromSlice("Arenas"),
                 element.type == .MemoryByArena,
-                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.MemoryByArena)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @backingInt(DebugType.MemoryByArena)),
             );
             layout.booleanButton(
                 .fromSlice("Frames"),
                 element.type == .MemoryByFrame,
-                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.MemoryByFrame)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @backingInt(DebugType.MemoryByFrame)),
             );
             layout.booleanButton(
                 .fromSlice("Sizes"),
                 element.type == .MemoryBySize,
-                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.MemoryBySize)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @backingInt(DebugType.MemoryBySize)),
             );
             layout.booleanButton(
                 .fromSlice("Debug"),
@@ -2791,7 +2791,7 @@ fn markEditedEvent(debug_state: *DebugState, opt_event: ?*DebugEvent) void {
         if (debug_state.getElementFromEvent(
             event,
             null,
-            @intFromEnum(ElementAddOp.AddToGroup) | @intFromEnum(ElementAddOp.CreateHierarchy),
+            @backingInt(ElementAddOp.AddToGroup) | @backingInt(ElementAddOp.CreateHierarchy),
         )) |element| {
             shared.global_debug_table.edit_event.guid = element.original_guid;
         }
@@ -2901,11 +2901,11 @@ fn debugInit(assets: *Assets, render_dim: Vector2u) *DebugState {
 
     debug_state.dev_ui.init(assets);
 
-    debug_state.dev_mode_links[@intFromEnum(DevMode.Profiling)] = debug_state.profile_group;
-    debug_state.dev_mode_links[@intFromEnum(DevMode.Rendering)] = null;
-    debug_state.dev_mode_links[@intFromEnum(DevMode.Lighting)] = null;
-    debug_state.dev_mode_links[@intFromEnum(DevMode.Memory)] = debug_state.memory_group;
-    debug_state.dev_mode_links[@intFromEnum(DevMode.Dump)] = debug_state.root_group;
+    debug_state.dev_mode_links[@backingInt(DevMode.Profiling)] = debug_state.profile_group;
+    debug_state.dev_mode_links[@backingInt(DevMode.Rendering)] = null;
+    debug_state.dev_mode_links[@backingInt(DevMode.Lighting)] = null;
+    debug_state.dev_mode_links[@backingInt(DevMode.Memory)] = debug_state.memory_group;
+    debug_state.dev_mode_links[@backingInt(DevMode.Dump)] = debug_state.root_group;
 
     return debug_state;
 }
@@ -2939,7 +2939,7 @@ fn debugEnd(
     // drawTrees(debug_state, ui.mouse_position);
 
     if (game_memory.game_state) |state| {
-        const dev_mode_index: u32 = @intFromEnum(state.dev_mode);
+        const dev_mode_index: u32 = @backingInt(state.dev_mode);
         if (dev_mode_index < debug_state.dev_mode_links.len) {
             drawTree(
                 debug_state,

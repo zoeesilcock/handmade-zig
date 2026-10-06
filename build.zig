@@ -1,14 +1,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const Translator = @import("translate_c").Translator;
 
 // Defaults.
-const FORCE_RELEASE_MODE = true;
+const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
 const SLOW_DEFAULT = false;
 const EMIT_ASM = false;
 
-const Package = enum {
+const Package = enum(u32) {
     All,
     Game,
     Executable,
@@ -119,12 +120,21 @@ fn addExecutable(
     exe.root_module.addOptions("build_options", build_options);
 
     if (!internal) {
-        exe.subsystem = .Windows;
+        exe.subsystem = .windows;
     }
 
     // Add the win32 API wrapper.
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     exe.root_module.addImport("win32", zigwin32);
+
+    const translate_c = b.dependency("translate_c", .{});
+    const t: Translator = .init(translate_c, .{
+        .c_source_file = b.path("src/win32_opengl.h"),
+        .target = target,
+        .optimize = optimize,
+        .default_init = true,
+    });
+    exe.root_module.addImport("gl_c", t.mod);
 
     if (EMIT_ASM) {
         // Emit generated assembly of the main executable.
@@ -225,7 +235,7 @@ fn addAssetBuilder(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const shared_module = b.addModule("shared", .{
+    const shared_module = b.createModule(.{
         .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
@@ -251,6 +261,16 @@ fn addAssetBuilder(
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     asset_builder_exe.root_module.addImport("win32", zigwin32);
 
+    const translate_c = b.dependency("translate_c", .{});
+    const t: Translator = .init(translate_c, .{
+        .c_source_file = b.path("tools/test_asset_builder.h"),
+        .target = target,
+        .optimize = optimize,
+        .default_init = true,
+    });
+    t.addIncludePath(stb_dep.?.path(""));
+    asset_builder_exe.root_module.addImport("c", t.mod);
+
     b.installArtifact(asset_builder_exe);
 
     // Allow running asset builder from build command.
@@ -266,7 +286,7 @@ fn addFontExtractor(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const shared_module = b.addModule("shared", .{
+    const shared_module = b.createModule(.{
         .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
@@ -289,13 +309,20 @@ fn addFontExtractor(
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     font_extractor_exe.root_module.addImport("win32", zigwin32);
 
+    const translate_c = b.dependency("translate_c", .{});
+    const t: Translator = .init(translate_c, .{
+        .c_source_file = b.path("tools/hh_font.h"),
+        .target = target,
+        .optimize = optimize,
+        .default_init = true,
+    });
+    font_extractor_exe.root_module.addImport("c", t.mod);
+
     b.installArtifact(font_extractor_exe);
 
     // Allow running asset builder from build command.
     const run_font_extractor = b.addRunArtifact(font_extractor_exe);
-    if (b.args) |args| {
-        run_font_extractor.addArgs(args);
-    }
+    run_font_extractor.addPassthruArgs();
     const font_extractor_run_step = b.step("extract-fonts", "Run the font extractor");
     run_font_extractor.setCwd(b.path("."));
     font_extractor_run_step.dependOn(&run_font_extractor.step);
@@ -307,7 +334,7 @@ fn addHHAEdit(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const shared_module = b.addModule("shared", .{
+    const shared_module = b.createModule(.{
         .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
@@ -332,9 +359,7 @@ fn addHHAEdit(
 
     // Allow running asset builder from build command.
     const run_hha_edit = b.addRunArtifact(hha_edit_exe);
-    if (b.args) |args| {
-        run_hha_edit.addArgs(args);
-    }
+    run_hha_edit.addPassthruArgs();
     const hha_edit_run_step = b.step("hha-edit", "Run the HHA edit tool");
     run_hha_edit.setCwd(b.path("data/"));
     hha_edit_run_step.dependOn(&run_hha_edit.step);
@@ -346,7 +371,7 @@ fn addSimplePreprocessor(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const shared_module = b.addModule("shared", .{
+    const shared_module = b.createModule(.{
         .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
@@ -383,7 +408,7 @@ fn addRaytracer(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const math_module = b.addModule("math", .{
+    const math_module = b.createModule(.{
         .root_source_file = b.path("src/math.zig"),
         .target = target,
         .optimize = optimize,
@@ -404,13 +429,20 @@ fn addRaytracer(
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     raytracer_exe.root_module.addImport("win32", zigwin32);
 
+    const translate_c = b.dependency("translate_c", .{});
+    const t: Translator = .init(translate_c, .{
+        .c_source_file = b.path("tools/ray.h"),
+        .target = target,
+        .optimize = optimize,
+        .default_init = true,
+    });
+    raytracer_exe.root_module.addImport("c", t.mod);
+
     b.installArtifact(raytracer_exe);
 
     // Allow running the raytracer from a build command.
     const run_raytracer = b.addRunArtifact(raytracer_exe);
-    if (b.args) |args| {
-        run_raytracer.addArgs(args);
-    }
+    run_raytracer.addPassthruArgs();
     const raytracer_run_step = b.step("run-raytracer", "Run the raytracer");
     run_raytracer.setCwd(b.path("test/"));
     // raytracer_run_step.dependOn(&run_raytracer.step);
@@ -430,7 +462,7 @@ fn addTestPNG(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const png_module = b.addModule("png", .{
+    const png_module = b.createModule(.{
         .root_source_file = b.path("src/png.zig"),
         .target = target,
         .optimize = optimize,
@@ -449,13 +481,20 @@ fn addTestPNG(
     test_png_exe.root_module.addOptions("build_options", build_options);
     test_png_exe.root_module.addImport("png", png_module);
 
+    const translate_c = b.dependency("translate_c", .{});
+    const t: Translator = .init(translate_c, .{
+        .c_source_file = b.path("tools/test_png.h"),
+        .target = target,
+        .optimize = optimize,
+        .default_init = true,
+    });
+    test_png_exe.root_module.addImport("c", t.mod);
+
     b.installArtifact(test_png_exe);
 
     // Allow running the png reader from a build command.
     const run_test_png = b.addRunArtifact(test_png_exe);
-    if (b.args) |args| {
-        run_test_png.addArgs(args);
-    }
+    run_test_png.addPassthruArgs();
     const test_png_run_step = b.step("run-test-png", "Run the png reader");
     run_test_png.setCwd(b.path("."));
     test_png_run_step.dependOn(&run_test_png.step);
@@ -483,9 +522,7 @@ fn addSimpleCompressor(
 
     // Allow running the preprocessor from build command.
     const run_simple_compressor = b.addRunArtifact(simple_compressor_exe);
-    if (b.args) |args| {
-        run_simple_compressor.addArgs(args);
-    }
+    run_simple_compressor.addPassthruArgs();
     const simple_preprocessor_run_step = b.step("simple-compressor", "Run the compressor");
     run_simple_compressor.setCwd(b.path("."));
     simple_preprocessor_run_step.dependOn(&run_simple_compressor.step);
@@ -511,14 +548,23 @@ fn addRendererTest(
     exe.root_module.addOptions("build_options", build_options);
 
     if (!internal) {
-        exe.subsystem = .Windows;
+        exe.subsystem = .windows;
     } else {
-        exe.subsystem = .Console;
+        exe.subsystem = .console;
     }
 
     // Add the win32 API wrapper.
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     exe.root_module.addImport("win32", zigwin32);
+
+    const translate_c = b.dependency("translate_c", .{});
+    const t: Translator = .init(translate_c, .{
+        .c_source_file = b.path("src/win32_renderer_test.h"),
+        .target = target,
+        .optimize = optimize,
+        .default_init = true,
+    });
+    exe.root_module.addImport("c", t.mod);
 
     b.installArtifact(exe);
 
@@ -535,7 +581,7 @@ fn addGenerateSamplingSpheres(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const shared_module = b.addModule("shared", .{
+    const shared_module = b.createModule(.{
         .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
@@ -560,9 +606,7 @@ fn addGenerateSamplingSpheres(
 
     // Allow running asset builder from build command.
     const run_generate_sampling_spheres = b.addRunArtifact(generate_sampling_spheres_exe);
-    if (b.args) |args| {
-        run_generate_sampling_spheres.addArgs(args);
-    }
+    run_generate_sampling_spheres.addPassthruArgs();
     const generate_sampling_spheres_run_step = b.step("generate-sampling-spheres", "Run the generate sampling spheres tool");
     run_generate_sampling_spheres.setCwd(b.path("data/"));
     generate_sampling_spheres_run_step.dependOn(&run_generate_sampling_spheres.step);

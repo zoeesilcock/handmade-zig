@@ -81,7 +81,7 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_start = Vector3.new(0, 0, 10),
         .camera_end = Vector3.new(-4, -2, 5),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(0, 0, -200), .height = 300, .flags = @intFromEnum(SceneLayerFlags.AtInfinity) }, // Sky background.
+            SceneLayer{ .position = Vector3.new(0, 0, -200), .height = 300, .flags = @backingInt(SceneLayerFlags.AtInfinity) }, // Sky background.
             SceneLayer{ .position = Vector3.new(0, 0, -170), .height = 300 }, // Weird sky light.
             SceneLayer{ .position = Vector3.new(0, 0, -100), .height = 40 }, // Backmost row of trees.
             SceneLayer{ .position = Vector3.new(0, 10, -70), .height = 80 }, // Middle hills and trees.
@@ -111,9 +111,9 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_start = Vector3.new(0, 0.5, 0),
         .camera_end = Vector3.new(0, 6.5, -1.5),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(0, 0, -30), .height = 100, .flags = @intFromEnum(SceneLayerFlags.AtInfinity) }, // Sky.
-            SceneLayer{ .position = Vector3.new(0, 0, -20), .height = 45, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Trees.
-            SceneLayer{ .position = Vector3.new(0, -2, -4), .height = 15, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Window.
+            SceneLayer{ .position = Vector3.new(0, 0, -30), .height = 100, .flags = @backingInt(SceneLayerFlags.AtInfinity) }, // Sky.
+            SceneLayer{ .position = Vector3.new(0, 0, -20), .height = 45, .flags = @backingInt(SceneLayerFlags.CounterCameraY) }, // Trees.
+            SceneLayer{ .position = Vector3.new(0, -2, -4), .height = 15, .flags = @backingInt(SceneLayerFlags.CounterCameraY) }, // Window.
             SceneLayer{ .position = Vector3.new(0, 0.35, -0.5), .height = 1 }, // Hero.
         },
     },
@@ -125,8 +125,8 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_end = Vector3.new(0, 0, -0.5),
         .layers = &.{
             SceneLayer{ .position = Vector3.new(0, 0, -4.1), .height = 6 }, // Background.
-            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0, 0.5), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 1.
-            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 2.
+            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0, 0.5), .flags = @backingInt(SceneLayerFlags.Transient) }, // Santa 1.
+            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0.5, 1), .flags = @backingInt(SceneLayerFlags.Transient) }, // Santa 2.
             SceneLayer{ .position = Vector3.new(2.25, -1.5, -3), .height = 2 }, // Foreground 1.
             SceneLayer{ .position = Vector3.new(0, 0.35, -1), .height = 1 }, // Tinsel.
         },
@@ -139,10 +139,10 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_end = Vector3.new(0, 0.5, -1),
         .layers = &.{
             SceneLayer{ .position = Vector3.new(0, 0, -20), .height = 30 }, // Background.
-            SceneLayer{ .position = Vector3.new(0, 0, -5), .height = 8, .params = Vector2.new(0, 0.5), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Entrance.
-            SceneLayer{ .position = Vector3.new(0, 0, -5), .height = 8, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Entrance open.
-            SceneLayer{ .position = Vector3.new(0, 0, -3), .height = 4, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Crampus.
-            SceneLayer{ .position = Vector3.new(0, 0, -2), .height = 3, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Snow.
+            SceneLayer{ .position = Vector3.new(0, 0, -5), .height = 8, .params = Vector2.new(0, 0.5), .flags = @backingInt(SceneLayerFlags.Transient) }, // Entrance.
+            SceneLayer{ .position = Vector3.new(0, 0, -5), .height = 8, .params = Vector2.new(0.5, 1), .flags = @backingInt(SceneLayerFlags.Transient) }, // Entrance open.
+            SceneLayer{ .position = Vector3.new(0, 0, -3), .height = 4, .params = Vector2.new(0.5, 1), .flags = @backingInt(SceneLayerFlags.Transient) }, // Crampus.
+            SceneLayer{ .position = Vector3.new(0, 0, -2), .height = 3, .params = Vector2.new(0.5, 1), .flags = @backingInt(SceneLayerFlags.Transient) }, // Snow.
         },
     },
 
@@ -169,7 +169,7 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(2, 0, 0),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(-0.5, 0, -8), .height = 12, .flags = @intFromEnum(SceneLayerFlags.CounterCameraX) }, // Background.
+            SceneLayer{ .position = Vector3.new(-0.5, 0, -8), .height = 12, .flags = @backingInt(SceneLayerFlags.CounterCameraX) }, // Background.
             SceneLayer{ .position = Vector3.new(-1, 0, -4), .height = 6 }, // Crampus.
         },
     },
@@ -182,7 +182,7 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_end = Vector3.new(0, -0.5, -1),
         .layers = &.{
             SceneLayer{ .position = Vector3.new(0, 0, -8), .height = 12 }, // Background.
-            SceneLayer{ .position = Vector3.new(0, -1, -5), .height = 4, .params = Vector2.new(0.05, 15), .flags = @intFromEnum(SceneLayerFlags.Floaty) }, // Glove.
+            SceneLayer{ .position = Vector3.new(0, -1, -5), .height = 4, .params = Vector2.new(0.05, 15), .flags = @backingInt(SceneLayerFlags.Floaty) }, // Glove.
             SceneLayer{ .position = Vector3.new(3, -1.5, -3), .height = 2 }, // Children.
             SceneLayer{ .position = Vector3.new(0, 0, -1.5), .height = 2.5 }, // Tinsel.
         },
@@ -209,7 +209,7 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(-0.1, 0.05, -0.5),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(-15, 25, -100), .height = 130, .flags = @intFromEnum(SceneLayerFlags.AtInfinity) }, // Background.
+            SceneLayer{ .position = Vector3.new(-15, 25, -100), .height = 130, .flags = @backingInt(SceneLayerFlags.AtInfinity) }, // Background.
             SceneLayer{ .position = Vector3.new(0, 0, -10), .height = 22 }, // Window.
             SceneLayer{ .position = Vector3.new(-0.8, -0.2, -3), .height = 4.5 }, // Hero.
             SceneLayer{ .position = Vector3.new(0, 0, -2), .height = 4.5 }, // Door.
@@ -224,7 +224,7 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(0.6, 0.5, -2),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(0, 0, -100), .height = 150, .flags = @intFromEnum(SceneLayerFlags.AtInfinity) }, // Background.
+            SceneLayer{ .position = Vector3.new(0, 0, -100), .height = 150, .flags = @backingInt(SceneLayerFlags.AtInfinity) }, // Background.
             SceneLayer{ .position = Vector3.new(0, 10, -40), .height = 40 }, // Hills.
             SceneLayer{ .position = Vector3.new(0, 3.2, -20), .height = 23 }, // Hills.
             SceneLayer{ .position = Vector3.new(0.25, 0.9, -10), .height = 13.5 }, // Hills.
@@ -397,7 +397,7 @@ fn renderCutsceneAtTime(
     cutscene_time: f32,
 ) bool {
     var cutscene_still_running = false;
-    const info: Cutscene = cutscenes[@intFromEnum(cutscene.cutscene_id)];
+    const info: Cutscene = cutscenes[@backingInt(cutscene.cutscene_id)];
     var time_base: f32 = 0;
     var shot_index: u32 = 0;
     while (shot_index < info.scene_count) : (shot_index += 1) {
@@ -458,7 +458,7 @@ fn renderLayeredScene(
         const layer: SceneLayer = scene.layers[layer_index - 1];
         var active = true;
 
-        if (layer.flags & @intFromEnum(SceneLayerFlags.Transient) != 0) {
+        if (layer.flags & @backingInt(SceneLayerFlags.Transient) != 0) {
             active = normal_time >= layer.params.x() and normal_time < layer.params.y();
         }
 
@@ -470,21 +470,21 @@ fn renderLayeredScene(
                 var offset_position: Vector3 = .zero();
                 var position: Vector3 = layer.position;
 
-                if (layer.flags & @intFromEnum(SceneLayerFlags.AtInfinity) != 0) {
+                if (layer.flags & @backingInt(SceneLayerFlags.AtInfinity) != 0) {
                     _ = position.setZ(position.z() + camera_offset.z());
                 }
 
-                if (layer.flags & @intFromEnum(SceneLayerFlags.Floaty) != 0) {
+                if (layer.flags & @backingInt(SceneLayerFlags.Floaty) != 0) {
                     _ = position.setY(position.y() + (layer.params.x() * @sin(layer.params.y() * normal_time)));
                 }
 
-                if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraX) != 0) {
+                if (layer.flags & @backingInt(SceneLayerFlags.CounterCameraX) != 0) {
                     _ = offset_position.setX(position.x() + camera_offset.x());
                 } else {
                     _ = offset_position.setX(position.x() - camera_offset.x());
                 }
 
-                if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraY) != 0) {
+                if (layer.flags & @backingInt(SceneLayerFlags.CounterCameraY) != 0) {
                     _ = offset_position.setY(position.y() + camera_offset.y());
                 } else {
                     _ = offset_position.setY(position.y() - camera_offset.y());

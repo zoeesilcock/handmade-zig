@@ -134,15 +134,16 @@ pub const RenderSettings = extern struct {
 
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));
-        inline for (type_info.@"struct".fields) |struct_field| {
-            if (struct_field.type == Vector2u) {
-                if (@field(self, struct_field.name).width() != @field(b, struct_field.name).width() or
-                    @field(self, struct_field.name).height() != @field(b, struct_field.name).height())
+        inline for (type_info.@"struct".field_names, 0..) |struct_field_name, i| {
+            const struct_field_type = type_info.@"struct".field_types[i];
+            if (struct_field_type == Vector2u) {
+                if (@field(self, struct_field_name).width() != @field(b, struct_field_name).width() or
+                    @field(self, struct_field_name).height() != @field(b, struct_field_name).height())
                 {
                     return false;
                 }
             } else {
-                if (@field(self, struct_field.name) != @field(b, struct_field.name)) {
+                if (@field(self, struct_field_name) != @field(b, struct_field_name)) {
                     return false;
                 }
             }
@@ -358,9 +359,9 @@ pub const RenderGroupFlags = enum(u32) {
     HandleTransparency = 0x4,
 
     pub const default: u32 =
-        @intFromEnum(RenderGroupFlags.ClearColor) |
-        @intFromEnum(RenderGroupFlags.ClearDepth) |
-        @intFromEnum(RenderGroupFlags.HandleTransparency);
+        @backingInt(RenderGroupFlags.ClearColor) |
+        @backingInt(RenderGroupFlags.ClearDepth) |
+        @backingInt(RenderGroupFlags.HandleTransparency);
 };
 
 pub const RenderGroup = extern struct {
@@ -446,16 +447,16 @@ pub const RenderGroup = extern struct {
         };
         self.pushSetup(&initial_setup);
 
-        if ((flags & @intFromEnum(RenderGroupFlags.HandleTransparency)) != 0) {
-            std.debug.assert((flags & @intFromEnum(RenderGroupFlags.ClearColor)) != 0);
-            std.debug.assert((flags & @intFromEnum(RenderGroupFlags.ClearDepth)) != 0);
+        if ((flags & @backingInt(RenderGroupFlags.HandleTransparency)) != 0) {
+            std.debug.assert((flags & @backingInt(RenderGroupFlags.ClearColor)) != 0);
+            std.debug.assert((flags & @backingInt(RenderGroupFlags.ClearDepth)) != 0);
             self.beginDepthPeel_(clear_color);
         } else {
-            if ((flags & @intFromEnum(RenderGroupFlags.ClearColor)) != 0) {
-                std.debug.assert((flags & @intFromEnum(RenderGroupFlags.ClearDepth)) != 0);
+            if ((flags & @backingInt(RenderGroupFlags.ClearColor)) != 0) {
+                std.debug.assert((flags & @backingInt(RenderGroupFlags.ClearDepth)) != 0);
 
                 self.pushFullClear_(clear_color);
-            } else if ((flags & @intFromEnum(RenderGroupFlags.ClearDepth)) != 0) {
+            } else if ((flags & @backingInt(RenderGroupFlags.ClearDepth)) != 0) {
                 self.pushDepthClear_();
             }
         }
@@ -464,7 +465,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn end(self: *RenderGroup) void {
-        if ((self.flags & @intFromEnum(RenderGroupFlags.HandleTransparency)) != 0) {
+        if ((self.flags & @backingInt(RenderGroupFlags.HandleTransparency)) != 0) {
             self.endDepthPeel_();
         }
 
@@ -1386,8 +1387,8 @@ pub const RenderGroup = extern struct {
         const far_clip_plane: f32 = opt_far_clip_plane orelse 100;
         const fog_params: *const FogParams = opt_fog_params orelse &.default;
         const alpha_clip_params: *const AlphaClipParams = opt_alpha_clip_params orelse &.default;
-        const is_ortho: bool = (flags & @intFromEnum(CameraTransformFlag.IsOrthographic)) != 0;
-        const is_debug: bool = (flags & @intFromEnum(CameraTransformFlag.IsDebug)) != 0;
+        const is_ortho: bool = (flags & @backingInt(CameraTransformFlag.IsOrthographic)) != 0;
+        const is_debug: bool = (flags & @backingInt(CameraTransformFlag.IsDebug)) != 0;
 
         const b: f32 = math.safeRatio1(
             @floatFromInt(self.commands.settings.render_dim.width()),

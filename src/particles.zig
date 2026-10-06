@@ -33,18 +33,18 @@ pub const PARTICLE_CEL_DIM = 32;
 const MAX_PARTICLE_COUNT = 1024;
 const MAX_PARTICLE_COUNT_4 = MAX_PARTICLE_COUNT / 4;
 
-pub const ParticleCache = extern struct {
+pub const ParticleCache = struct {
     particle_entropy: RandomSeries, // Not for gameplay, ever!
     fire_system: ParticleSystem,
 };
 
-pub const ParticleSystem = extern struct {
+pub const ParticleSystem = struct {
     particles: [MAX_PARTICLE_COUNT_4]Particle4x,
     next_particle_4: u32,
     bitmap_id: BitmapId,
 };
 
-const Particle4x = extern struct {
+const Particle4x = struct {
     p: V3_4x,
     dp: V3_4x,
     ddp: V3_4x,

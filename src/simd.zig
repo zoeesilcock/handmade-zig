@@ -48,7 +48,7 @@ pub fn signBitFrom(self: F32_4x) U32_4x {
     return @as(U32_4x, @bitCast(self)) & mask;
 }
 
-pub const V3_4x = extern struct {
+pub const V3_4x = struct {
     x: F32_4x,
     y: F32_4x,
     z: F32_4x,
@@ -274,7 +274,7 @@ pub const V3_4x = extern struct {
     }
 };
 
-pub const V4_4x = extern struct {
+pub const V4_4x = struct {
     r: F32_4x,
     g: F32_4x,
     b: F32_4x,

@@ -313,7 +313,7 @@ const ColorHandleType = enum(u32) {
     // NormalPositionLight, // Nx, Ny. TODO: Lp0, Lp1.
 };
 
-const COLOR_HANDLE_COUNT = @typeInfo(ColorHandleType).@"enum".fields.len;
+const COLOR_HANDLE_COUNT = @typeInfo(ColorHandleType).@"enum".field_names.len;
 
 const Framebuffer = extern struct {
     framebuffer_handle: u32 = 0,
@@ -1363,10 +1363,10 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     std.debug.assert(width > 0 and height > 0);
 
     var result: Framebuffer = .{};
-    const multisampled: bool = (flags & @intFromEnum(FramebufferFlags.Multisampled)) != 0;
-    const filtered: bool = (flags & @intFromEnum(FramebufferFlags.Filtered)) != 0;
-    const has_depth: bool = (flags & @intFromEnum(FramebufferFlags.Depth)) != 0;
-    const is_float: bool = (flags & @intFromEnum(FramebufferFlags.Float)) != 0;
+    const multisampled: bool = (flags & @backingInt(FramebufferFlags.Multisampled)) != 0;
+    const filtered: bool = (flags & @backingInt(FramebufferFlags.Filtered)) != 0;
+    const has_depth: bool = (flags & @backingInt(FramebufferFlags.Depth)) != 0;
+    const is_float: bool = (flags & @backingInt(FramebufferFlags.Float)) != 0;
 
     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&result.framebuffer_handle));
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, result.framebuffer_handle);
@@ -1504,7 +1504,7 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     open_gl.current_settings = settings.*;
     var resolve_flags: u32 = 0;
     if (!settings.pixelation_hint) {
-        resolve_flags |= @intFromEnum(FramebufferFlags.Filtered);
+        resolve_flags |= @backingInt(FramebufferFlags.Filtered);
     }
 
     open_gl.multisampling = settings.multisampling_hint;
@@ -1512,10 +1512,10 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     const render_width: i32 = @intCast(settings.render_dim.width());
     const render_height: i32 = @intCast(settings.render_dim.height());
 
-    var depth_peel_flags: u32 = @intFromEnum(FramebufferFlags.Depth);
+    var depth_peel_flags: u32 = @backingInt(FramebufferFlags.Depth);
     const multisampled_resolve_flags = depth_peel_flags;
     if (open_gl.multisampling) {
-        depth_peel_flags |= @intFromEnum(FramebufferFlags.Multisampled);
+        depth_peel_flags |= @backingInt(FramebufferFlags.Multisampled);
         open_gl.header.used_multisample_count = @intCast(open_gl.max_multi_sample_count);
     } else {
         open_gl.header.used_multisample_count = 1;
@@ -2120,7 +2120,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, peel_index);
         platform.optGLActiveTexture.?(texture_bind_index);
         texture_bind_index += 1;
-        gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[@intFromEnum(ColorHandleType.SurfaceReflection)]);
+        gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[@backingInt(ColorHandleType.SurfaceReflection)]);
     }
     // platform.optGLActiveTexture.?(texture_bind_index);
     // texture_bind_index += 1;

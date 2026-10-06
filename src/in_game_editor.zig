@@ -122,7 +122,7 @@ pub const EditableHitTest = struct {
     }
 };
 
-const InGameEditType = enum {
+const InGameEditType = enum(u32) {
     None,
     AlignPointEdit,
 };
@@ -131,7 +131,7 @@ const InGameEditChangeType = enum(u32) {
     ChangeFrom = 0,
     ChangeTo = 1,
 };
-const IN_GAME_EDIT_CHANGE_TYPE_COUNT = @typeInfo(InGameEditChangeType).@"enum".fields.len;
+const IN_GAME_EDIT_CHANGE_TYPE_COUNT = @typeInfo(InGameEditChangeType).@"enum".field_names.len;
 
 const AlignPointEdit = struct {
     asset_index: u32,
@@ -230,7 +230,7 @@ pub const InGameEditor = struct {
     draw_align_point: [HHA_BITMAP_ALIGN_POINT_COUNT]bool,
 
     pub fn init(self: *InGameEditor, assets: *Assets) void {
-        self.undo_memory.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
+        self.undo_memory.allocation_flags |= @backingInt(PlatformMemoryBlockFlags.NotRestored);
         self.assets = assets;
 
         self.undo_sentinel.sentinelize();
@@ -327,12 +327,12 @@ pub const InGameEditor = struct {
                     },
                 },
             };
-            match.operation.align_point_edit.change[@intFromEnum(InGameEditChangeType.ChangeFrom)] = point.*;
+            match.operation.align_point_edit.change[@backingInt(InGameEditChangeType.ChangeFrom)] = point.*;
 
             var edit: *InGameEdit = self.getOrCreatedEditInProgress(&match);
 
             point.set(align_point_type, to_parent, size, position_percent);
-            edit.operation.align_point_edit.change[@intFromEnum(InGameEditChangeType.ChangeTo)] = point.*;
+            edit.operation.align_point_edit.change[@backingInt(InGameEditChangeType.ChangeTo)] = point.*;
         }
     }
 
@@ -349,7 +349,7 @@ pub const InGameEditor = struct {
                     align_edit.asset_index,
                     align_edit.align_point_index,
                 );
-                point.?.* = align_edit.change[@intFromEnum(change_type)];
+                point.?.* = align_edit.change[@backingInt(change_type)];
             },
             else => unreachable,
         }
@@ -414,8 +414,8 @@ pub const InGameEditor = struct {
     }
 
     pub fn updateAndRender(self: *InGameEditor, ui: *DevUI, game_state: *shared.State) void {
-        if (@intFromEnum(self.dev_mode) > @intFromEnum(DevMode.FirstEditor) and
-            @intFromEnum(self.dev_mode) < @intFromEnum(DevMode.LastEditor))
+        if (@backingInt(self.dev_mode) > @backingInt(DevMode.FirstEditor) and
+            @backingInt(self.dev_mode) < @backingInt(DevMode.LastEditor))
         {
             var layout: dev_ui.Layout = .beginBox(
                 ui,
@@ -653,7 +653,7 @@ pub const InGameEditor = struct {
 
                         var to_parent: bool = point.isToParent();
                         const align_point_type: HHAAlignPointType = point.getType();
-                        var align_point_type_int: u32 = @intFromEnum(align_point_type);
+                        var align_point_type_int: u32 = @backingInt(align_point_type);
                         var position_percent: Vector2 = point.getPositionPercent();
                         var size: f32 = point.getSize();
 
@@ -670,13 +670,13 @@ pub const InGameEditor = struct {
                         if (layout.button(
                             .fromPointerAndLine(draw_toggle, @src()),
                             .fromSlice(point_name[0..point_name_length]),
-                            align_point_type_int != @intFromEnum(HHAAlignPointType.None),
+                            align_point_type_int != @backingInt(HHAAlignPointType.None),
                             button_color,
                         )) {
                             draw_toggle.* = !draw_toggle.*;
                         }
 
-                        if (align_point_type_int == @intFromEnum(HHAAlignPointType.None)) {
+                        if (align_point_type_int == @backingInt(HHAAlignPointType.None)) {
                             if (layout.button(
                                 .fromPointerAndLine(point, @src()),
                                 .fromSlice("[ADD]"),
@@ -738,7 +738,7 @@ pub const InGameEditor = struct {
                                 self.editAlignPoint(
                                     asset_index,
                                     point_index,
-                                    @enumFromInt(align_point_type_int),
+                                    @fromBackingInt(@intCast(align_point_type_int)),
                                     to_parent,
                                     size,
                                     position_percent,

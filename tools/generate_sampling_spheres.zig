@@ -203,7 +203,7 @@ fn outputSpheres(
     try writer.print("pub const LIGHT_SAMPLING_SPHERE_MASK = {d};\n", .{light_sampling_sphere_count - 1});
     try writer.print("pub const LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE = {d};\n", .{ray_bundles_per_sphere});
     try writer.print("pub const LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE = 4 * LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE;\n", .{});
-    try writer.print("pub const LightSamplingSphere = extern struct {{\n", .{});
+    try writer.print("pub const LightSamplingSphere = struct {{\n", .{});
     try writer.print("    sample_direction: [LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE]V3_4x = @splat(.splat(@splat(0))),\n", .{});
     try writer.print("    cube_side_weight: [LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE][6]f32 = @splat(@splat(0)),\n", .{});
     try writer.print("}};\n\n", .{});

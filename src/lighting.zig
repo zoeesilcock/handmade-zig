@@ -138,9 +138,9 @@ const LightProbeSpatialIndex = extern struct {
     }
 };
 
-pub const LightingSolution = extern struct {
+pub const LightingSolution = struct {
     // TODO: We probably want to convert this system to one that actually uses a permanent box array where entities
-    // just write their box position directly into the cahce in a known locatioon, rather than generating the entire
+    // just write their box position directly into the cache in a known location, rather than generating the entire
     // array every frame?
     box_count: u16 = 0,
     boxes: [*]LightingBox = undefined,

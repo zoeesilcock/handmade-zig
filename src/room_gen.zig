@@ -59,10 +59,10 @@ fn getCameraOffsetZForDimension(dimension: Vector3i, camera_behaviour: *u32) f32
         x_distance = 15;
     } else if (dimension.x() == 14) {
         x_distance = 16;
-        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
+        camera_behaviour.* |= @backingInt(CameraBehavior.ViewPlayerX);
     } else if (dimension.x() >= 15) {
         x_distance = 17;
-        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
+        camera_behaviour.* |= @backingInt(CameraBehavior.ViewPlayerX);
     }
 
     var y_distance: f32 = 13;
@@ -72,10 +72,10 @@ fn getCameraOffsetZForDimension(dimension: Vector3i, camera_behaviour: *u32) f32
         y_distance = 17;
     } else if (dimension.y() == 12) {
         y_distance = 19;
-        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
+        camera_behaviour.* |= @backingInt(CameraBehavior.ViewPlayerY);
     } else if (dimension.y() >= 13) {
         y_distance = 21;
-        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
+        camera_behaviour.* |= @backingInt(CameraBehavior.ViewPlayerY);
     }
 
     const result: f32 = @max(x_distance, y_distance);
@@ -192,7 +192,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
             volume.getRadius(),
             volume.getCenter(),
             color,
-            @intFromEnum(EntityVisiblePieceFlag.Cube),
+            @backingInt(EntityVisiblePieceFlag.Cube),
         );
 
         if (randomize_top) {
@@ -312,7 +312,7 @@ pub fn generateApron(gen: *WorldGenerator, apron: *GenApron) void {
                 volume.getRadius(),
                 volume.getCenter(),
                 color,
-                @intFromEnum(EntityVisiblePieceFlag.Cube),
+                @backingInt(EntityVisiblePieceFlag.Cube),
             );
             _ = piece;
 

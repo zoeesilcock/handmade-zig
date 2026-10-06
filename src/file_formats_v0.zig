@@ -2,7 +2,7 @@ const file_formats = @import("file_formats.zig");
 
 pub const HHA_MAGIC_VALUE = file_formats.hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 0;
-pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeIdV0).@"enum".fields.len;
+pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeIdV0).@"enum".field_names.len;
 
 // Types.
 const HHASound = file_formats.HHASound;
@@ -41,7 +41,7 @@ pub const AssetTypeIdV0 = enum(u32) {
     Hand,
 
     pub fn toInt(self: AssetTypeIdV0) u32 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 

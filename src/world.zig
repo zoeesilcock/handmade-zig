@@ -38,7 +38,7 @@ const TILES_PER_CHUNK = 16;
 pub const MAX_SIM_REGION_ENTITY_COUNT = 2 * 8192;
 const WORLD_BLOCK_SIZE = 1 << 16;
 
-pub const World = extern struct {
+pub const World = struct {
     change_ticket: TicketMutex,
 
     chunk_dimension_in_meters: Vector3,
@@ -149,7 +149,7 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.first_free = null;
     world.arena = parent_arena;
     world.game_entropy = .seed(1233, null, null, null);
-    world.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
+    world.last_used_entity_storage_index = @backingInt(ReservedBrainId.FirstFree);
 
     world.max_unpacked_entity_count = MAX_SIM_REGION_ENTITY_COUNT; // 4 * MAX_SIM_REGION_ENTITY_COUNT;
     world.unpacked_entity_threshold = world.max_unpacked_entity_count - MAX_SIM_REGION_ENTITY_COUNT;

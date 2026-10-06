@@ -6,7 +6,7 @@ pub const Vector3i = math.Vector3i;
 
 pub fn getDirection(direction: box.BoxSurfaceIndex) Vector3i {
     var result: Vector3i = .zero();
-    const params: box.BoxSurfaceParams = box.getBoxSurfaceParams(@intFromEnum(direction));
+    const params: box.BoxSurfaceParams = box.getBoxSurfaceParams(@backingInt(direction));
     result.setValueAt(params.axis_index, if (params.positive > 0) 1 else -1);
     return result;
 }

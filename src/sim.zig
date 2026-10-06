@@ -312,7 +312,7 @@ pub fn registerEntity(sim_region: *SimRegion, entity: *Entity) void {
             const brain: *Brain = getOrAddBrain(
                 sim_region,
                 entity.brain_id,
-                @enumFromInt(entity.brain_slot.type),
+                @fromBackingInt(entity.brain_slot.type),
             );
             var ptr = @intFromPtr(&brain.parts.array);
             ptr += @sizeOf(*Entity) * entity.brain_slot.index;
@@ -441,7 +441,7 @@ pub fn handleCollision(entity: *Entity, hit_entity: *Entity) bool {
     // var b = hit_entity;
     //
     // // Sort entities based on type.
-    // if (@intFromEnum(a.type) > @intFromEnum(b.type)) {
+    // if (@backingInt(a.type) > @backingInt(b.type)) {
     //     const temp = a;
     //     a = b;
     //     b = temp;
@@ -650,11 +650,11 @@ pub fn moveEntity(
 }
 
 pub fn isRoom(entity: *Entity) bool {
-    return entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom);
+    return entity.brain_slot.type == @backingInt(BrainType.BrainRoom);
 }
 
 pub fn isLightProbe(entity: *Entity) bool {
-    return entity.brain_slot.type == @intFromEnum(BrainType.BrainLightProbe);
+    return entity.brain_slot.type == @backingInt(BrainType.BrainLightProbe);
 }
 
 pub fn updateCameraForEntityMovement(
@@ -680,7 +680,7 @@ pub fn updateCameraForEntityMovement(
         if (test_entity.camera_behavior > 0) {
             var pass: bool = entityOverlapsEntity(entity, test_entity);
 
-            if (test_entity.camera_behavior & @intFromEnum(CameraBehavior.GeneralVelocityConstraint) != 0) {
+            if (test_entity.camera_behavior & @backingInt(CameraBehavior.GeneralVelocityConstraint) != 0) {
                 pass = pass and math.isInRange(
                     test_entity.camera_min_velocity,
                     entity.velocity.length(),
@@ -688,7 +688,7 @@ pub fn updateCameraForEntityMovement(
                 );
             }
 
-            if (test_entity.camera_behavior & @intFromEnum(CameraBehavior.DirectionalVelocityConstraint) != 0) {
+            if (test_entity.camera_behavior & @backingInt(CameraBehavior.DirectionalVelocityConstraint) != 0) {
                 pass = pass and math.isInRange(
                     test_entity.camera_min_velocity,
                     test_entity.camera_velocity_direction.dotProduct(entity.velocity),
@@ -739,19 +739,19 @@ pub fn updateCameraForEntityMovement(
 
         if (opt_special_camera) |special_camera| {
             if (camera.time_in_special > special_camera.camera_min_time) {
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Inspect)) != 0) {
+                if ((special_camera.camera_behavior & @backingInt(CameraBehavior.Inspect)) != 0) {
                     new_target_position = special_camera.position;
                 }
 
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerX)) != 0) {
+                if ((special_camera.camera_behavior & @backingInt(CameraBehavior.ViewPlayerX)) != 0) {
                     _ = new_target_position.setX(entity.position.x());
                 }
 
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerY)) != 0) {
+                if ((special_camera.camera_behavior & @backingInt(CameraBehavior.ViewPlayerY)) != 0) {
                     _ = new_target_position.setY(entity.position.y());
                 }
 
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
+                if ((special_camera.camera_behavior & @backingInt(CameraBehavior.Offset)) != 0) {
                     new_target_position = special_camera.position;
                     _ = new_target_position.setXY(new_target_position.xy().plus(special_camera.camera_offset.xy()));
 
@@ -873,12 +873,12 @@ pub fn getClosestTraversable(
         while (point_index < test_entity.traversable_count) : (point_index += 1) {
             const point: EntityTraversablePoint = test_entity.getSimSpaceTraversable(point_index);
 
-            if ((flags & @intFromEnum(TraversableSearchFlag.Unoccupied) == 0) or point.occupier == null) {
+            if ((flags & @backingInt(TraversableSearchFlag.Unoccupied) == 0) or point.occupier == null) {
                 var to_point: Vector3 = point.position.minus(from_position);
-                if ((flags & @intFromEnum(TraversableSearchFlag.ClippedZ) == 0) or
+                if ((flags & @backingInt(TraversableSearchFlag.ClippedZ) == 0) or
                     (to_point.z() >= -2 and to_point.z() <= 2))
                 {
-                    if (flags & @intFromEnum(TraversableSearchFlag.ClippedZ) == 1) {
+                    if (flags & @backingInt(TraversableSearchFlag.ClippedZ) == 1) {
                         _ = to_point.setZ(0);
                     }
 

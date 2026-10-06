@@ -93,7 +93,7 @@ pub const GameCamera = extern struct {
     time_in_special: f32,
 };
 
-pub const GameModeWorld = extern struct {
+pub const GameModeWorld = struct {
     world: *world.World = undefined,
     camera: GameCamera,
 
@@ -223,9 +223,9 @@ fn checkForJoiningPlayers(
                             sim_region,
                             .zero(),
                             &traversable,
-                            @intFromEnum(TraversableSearchFlag.Unoccupied),
+                            @backingInt(TraversableSearchFlag.Unoccupied),
                         )) {
-                            controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
+                            controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @backingInt(ReservedBrainId.FirstHero) };
                             addPlayer(world_mode, sim_region, traversable, controlled_hero.brain_id);
                         }
                     }
@@ -290,7 +290,7 @@ fn addPlayer(
         hero_scale,
         .new(0, 0, 0),
         color,
-        @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
+        @backingInt(EntityVisiblePieceFlag.AxesDeform),
     );
     const head_piece: *EntityVisiblePiece = entity_gen.addPiece(body, .Head, hero_scale, .new(0, 0, 0.15), color, null);
     const hat_piece: *EntityVisiblePiece = entity_gen.addPiece(body, .Item, hero_scale, .new(0, 0, 0.2), color, null);
@@ -564,7 +564,7 @@ pub fn updateAndRenderWorld(
             debug_camera_o.getColumn(1),
             debug_camera_o.getColumn(2),
             debug_camera_ot,
-            @intFromEnum(renderer.CameraTransformFlag.IsDebug),
+            @backingInt(renderer.CameraTransformFlag.IsDebug),
             near_clip_plane,
             far_clip_plane,
             null,
@@ -782,7 +782,7 @@ pub fn updateAndRenderWorld(
         render_group = RenderGroup.begin(
             state.assets,
             render_commands,
-            @intFromEnum(RenderGroupFlags.ClearColor) | @intFromEnum(RenderGroupFlags.ClearDepth),
+            @backingInt(RenderGroupFlags.ClearColor) | @backingInt(RenderGroupFlags.ClearDepth),
             .new(0.5, 0.5, 0.5, 0),
         );
 

@@ -95,7 +95,7 @@ const AssetState = enum(u32) {
     Loaded,
 
     pub fn toInt(self: AssetState) u32 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -282,7 +282,7 @@ pub const Assets = struct {
 
         assets.next_free_texture_handle = 1;
 
-        assets.tag_range[@intFromEnum(AssetTagId.FacingDirection)] = math.TAU32;
+        assets.tag_range[@backingInt(AssetTagId.FacingDirection)] = math.TAU32;
 
         assets.tag_count = 1;
         assets.asset_count = 1;
@@ -456,7 +456,7 @@ pub const Assets = struct {
                         var asset_tag_index: u32 = asset.hha.first_tag_index;
                         while (asset_tag_index < asset.hha.one_past_last_tag_index) : (asset_tag_index += 1) {
                             if (assets.tags[asset_tag_index].id == .BasicCategory) {
-                                type_id = @enumFromInt(@as(u32, @intFromFloat(assets.tags[asset_tag_index].value)));
+                                type_id = @fromBackingInt(@as(u32, @intFromFloat(assets.tags[asset_tag_index].value)));
                             }
                         }
 
@@ -508,9 +508,9 @@ pub const Assets = struct {
             assets.file_count += 1;
 
             var arena: *MemoryArena = &assets.non_restored_memory;
-            var open_flags: u32 = @intFromEnum(shared.OpenFileModeFlags.Read);
+            var open_flags: u32 = @backingInt(shared.OpenFileModeFlags.Read);
             if (INTERNAL) {
-                open_flags |= @intFromEnum(shared.OpenFileModeFlags.Write);
+                open_flags |= @backingInt(shared.OpenFileModeFlags.Write);
             }
 
             const file: *AssetFile = &assets.files[file_index];
@@ -615,7 +615,7 @@ pub const Assets = struct {
         var result: u32 = 0;
         var best_match: f32 = 0;
 
-        var asset_index: u32 = self.first_asset_of_type[@intFromEnum(type_id)];
+        var asset_index: u32 = self.first_asset_of_type[@backingInt(type_id)];
         while (asset_index != 0) {
             const asset = self.assets[asset_index];
 
@@ -624,7 +624,7 @@ pub const Assets = struct {
             while (tag_index < asset.hha.one_past_last_tag_index) : (tag_index += 1) {
                 const tag: *HHATag = &self.tags[tag_index];
 
-                const a: f32 = match_vector.e[@intFromEnum(tag.id)];
+                const a: f32 = match_vector.e[@backingInt(tag.id)];
                 const b: f32 = tag.value;
                 const d0 = intrinsics.absoluteValue(a - b);
                 const d1 = intrinsics.absoluteValue((a - (self.tag_range[tag.id.toInt()] * intrinsics.signOfF32(a))) - b);
@@ -978,7 +978,7 @@ pub const Assets = struct {
     pub fn getSoundSamples(self: *Assets, id: SoundId) ?[*]i16 {
         var result: ?[*]i16 = null;
         if (self.getAsset(id.value)) |asset| {
-            if (asset.state == @intFromEnum(AssetState.Loaded)) {
+            if (asset.state == @backingInt(AssetState.Loaded)) {
                 std.debug.assert(id.value == 0 or asset.hha.type == .Sound);
 
                 const ranges: AssetSoundBufferRanges = self.getSoundBufferRanges();
@@ -1051,7 +1051,7 @@ pub const Assets = struct {
         id: ?FontId,
     ) void {
         var asset = &self.assets[id.?.value];
-        std.debug.assert(asset.state == @intFromEnum(AssetState.Unloaded));
+        std.debug.assert(asset.state == @backingInt(AssetState.Unloaded));
 
         const info: HHAFont = asset.hha.info.font;
 
@@ -1098,7 +1098,7 @@ pub const Assets = struct {
                 font.unicode_map[glyph.unicode_code_point] = @intCast(glyph_index);
             }
 
-            asset.state = @intFromEnum(AssetState.Loaded);
+            asset.state = @backingInt(AssetState.Loaded);
             self.non_restored_memory.keepTemporaryMemory(memory_point);
         } else {
             self.non_restored_memory.endTemporaryMemory(memory_point);
@@ -1116,7 +1116,7 @@ pub const Assets = struct {
         var result: ?*LoadedFont = null;
         if (self.getAsset(id.value)) |asset| {
             std.debug.assert(id.value == 0 or asset.hha.type == .Font);
-            if (asset.state == @intFromEnum(AssetState.Loaded)) {
+            if (asset.state == @backingInt(AssetState.Loaded)) {
                 if (asset.handle != .font) {
                     asset.handle = .{ .font = .{} };
                 }
@@ -1231,6 +1231,6 @@ fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callcon
         renderer.completeTextureOp(work.texture_queue.?, texture_op);
     }
 
-    work.asset.state = @intFromEnum(resulting_state);
+    work.asset.state = @backingInt(resulting_state);
     handmade.endTaskWithMemory(work.task);
 }

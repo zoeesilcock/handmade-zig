@@ -33,7 +33,7 @@ pub const ArenaPushParams = extern struct {
 
     pub fn default() ArenaPushParams {
         return ArenaPushParams{
-            .flags = @intFromEnum(ArenaPushFlag.ClearToZero),
+            .flags = @backingInt(ArenaPushFlag.ClearToZero),
             .alignment = 4,
         };
     }
@@ -41,9 +41,9 @@ pub const ArenaPushParams = extern struct {
     pub fn aligned(alignment: u32, clear: bool) ArenaPushParams {
         var result = ArenaPushParams.default();
         if (clear) {
-            result.flags |= @intFromEnum(ArenaPushFlag.ClearToZero);
+            result.flags |= @backingInt(ArenaPushFlag.ClearToZero);
         } else {
-            result.flags &= ~@intFromEnum(ArenaPushFlag.ClearToZero);
+            result.flags &= ~@backingInt(ArenaPushFlag.ClearToZero);
         }
         result.alignment = alignment;
         return result;
@@ -51,14 +51,14 @@ pub const ArenaPushParams = extern struct {
 
     pub fn alignedNoClear(alignment: u32) ArenaPushParams {
         var result = ArenaPushParams.default();
-        result.flags &= ~@intFromEnum(ArenaPushFlag.ClearToZero);
+        result.flags &= ~@backingInt(ArenaPushFlag.ClearToZero);
         result.alignment = alignment;
         return result;
     }
 
     pub fn noClear() ArenaPushParams {
         var result = ArenaPushParams.default();
-        result.flags &= ~@intFromEnum(ArenaPushFlag.ClearToZero);
+        result.flags &= ~@backingInt(ArenaPushFlag.ClearToZero);
         return result;
     }
 };
@@ -77,7 +77,7 @@ pub const ArenaBootstrapParams = extern struct {
     pub fn nonRestored() ArenaBootstrapParams {
         var result: ArenaBootstrapParams = .default();
 
-        result.allocation_flags = @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
+        result.allocation_flags = @backingInt(PlatformMemoryBlockFlags.NotRestored);
 
         return result;
     }
@@ -144,8 +144,8 @@ pub const MemoryArena = extern struct {
             aligned_size = size;
 
             if (self.allocation_flags &
-                (@intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) |
-                    @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck)) != 0)
+                (@backingInt(PlatformMemoryBlockFlags.OverflowCheck) |
+                    @backingInt(PlatformMemoryBlockFlags.UnderflowCheck)) != 0)
             {
                 self.minimum_block_size = 0;
                 aligned_size = types.alignPow2(@intCast(size), params.alignment);
@@ -175,7 +175,7 @@ pub const MemoryArena = extern struct {
         // than the page alignment.
         std.debug.assert(self.current_block.?.used <= self.current_block.?.size);
 
-        if (params.flags & @intFromEnum(ArenaPushFlag.ClearToZero) != 0) {
+        if (params.flags & @backingInt(ArenaPushFlag.ClearToZero) != 0) {
             zeroSize(size, @ptrCast(result));
         }
 

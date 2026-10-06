@@ -6,10 +6,7 @@ const intrinsics = @import("intrinsics.zig");
 const renderer = @import("renderer.zig");
 const cam = @import("camera.zig");
 const win32_renderer = @import("win32_renderer.zig");
-
-const c = @cImport({
-    @cInclude("stdlib.h");
-});
+const c = @import("c");
 
 // Build options.
 pub const INTERNAL = @import("build_options").internal;

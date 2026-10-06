@@ -255,14 +255,14 @@ pub fn writeModificationsToHHA(assets: *Assets, file_index: u32, temp_arena: *Me
 pub fn setAssetType(assets: *Assets, asset_index: u32, type_id: AssetBasicCategory) void {
     // TODO: We don't really want to be doing this anymore, we just want a tag-matching acceleration structure that
     // we can rebuild during imports, because we want it to be easy to do things like change the types of assets.
-    if (asset_index != 0 and @intFromEnum(type_id) < @typeInfo(AssetBasicCategory).@"enum".fields.len) {
+    if (asset_index != 0 and @backingInt(type_id) < @typeInfo(AssetBasicCategory).@"enum".field_names.len) {
         var asset: *Asset = &assets.assets[asset_index];
         std.debug.assert(asset.next_of_type == 0);
         std.debug.assert(asset.asset_type == 0);
-        asset.asset_type = @intFromEnum(type_id);
+        asset.asset_type = @backingInt(type_id);
         if (type_id != .None) {
-            asset.next_of_type = assets.first_asset_of_type[@intFromEnum(type_id)];
-            assets.first_asset_of_type[@intFromEnum(type_id)] = asset_index;
+            asset.next_of_type = assets.first_asset_of_type[@backingInt(type_id)];
+            assets.first_asset_of_type[@backingInt(type_id)] = asset_index;
         }
     }
 }
@@ -708,7 +708,7 @@ fn endTags(
 
     // TODO: Make it explicit, instead of auto-ading the category?
     if (category != .None) {
-        addTag(builder, .BasicCategory, @floatFromInt(@as(u32, @intFromEnum(category))));
+        addTag(builder, .BasicCategory, @floatFromInt(@as(u32, @backingInt(category))));
     }
 
     result.type_id = category;
@@ -942,7 +942,7 @@ pub fn parseHHT(
     var handle: PlatformFileHandle = shared.platform.openFile(
         &context.file_group,
         @constCast(file_info),
-        @intFromEnum(shared.OpenFileModeFlags.Read),
+        @backingInt(shared.OpenFileModeFlags.Read),
     );
     var file_buffer: Buffer = .{
         .count = file_info.file_size,
@@ -981,7 +981,7 @@ pub fn parseHHT(
                     if (shared.platform.getFileByPath(
                         &context.file_group,
                         @ptrCast(path),
-                        @intFromEnum(shared.OpenFileModeFlags.Read),
+                        @backingInt(shared.OpenFileModeFlags.Read),
                     )) |included_file_info| {
                         const hht_out = context.hht_out;
                         const hht_copy_point = context.hht_copy_point;
@@ -1082,13 +1082,13 @@ fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool
         var file_info: ?*PlatformFileInfo = shared.platform.getFileByPath(
             &file_group,
             @ptrCast(path),
-            @intFromEnum(shared.OpenFileModeFlags.Read) | @intFromEnum(shared.OpenFileModeFlags.Write),
+            @backingInt(shared.OpenFileModeFlags.Read) | @backingInt(shared.OpenFileModeFlags.Write),
         );
         if (file_info != null) {
             var handle: PlatformFileHandle = shared.platform.openFile(
                 &file_group,
                 @constCast(file_info.?),
-                @intFromEnum(shared.OpenFileModeFlags.Write),
+                @backingInt(shared.OpenFileModeFlags.Write),
             );
 
             if (shared.platform.noFileErrors(&handle)) {
@@ -1102,7 +1102,7 @@ fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool
                 file_info = shared.platform.getFileByPath(
                     &file_group,
                     @ptrCast(path),
-                    @intFromEnum(shared.OpenFileModeFlags.Read) | @intFromEnum(shared.OpenFileModeFlags.Write),
+                    @backingInt(shared.OpenFileModeFlags.Read) | @backingInt(shared.OpenFileModeFlags.Write),
                 );
                 result = assets.initSourceHHA(&file_group, file_info.?);
             }
@@ -1493,7 +1493,7 @@ fn updateAssetDataFromFile(
             var handle: PlatformFileHandle = shared.platform.openFile(
                 &context.file_group,
                 @constCast(match.file_info.?),
-                @intFromEnum(shared.OpenFileModeFlags.Read),
+                @backingInt(shared.OpenFileModeFlags.Read),
             );
             var file_buffer: Buffer = .{
                 .count = match.file_info.?.file_size,
@@ -1592,7 +1592,7 @@ fn findMatchingFileFor(
     result.file_info = shared.platform.getFileByPath(
         &context.file_group,
         @ptrCast(path),
-        @intFromEnum(shared.OpenFileModeFlags.Read),
+        @backingInt(shared.OpenFileModeFlags.Read),
     );
     if (result.file_info != null) {
         result.source = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
@@ -1928,7 +1928,7 @@ fn parseTopLevelBlock(
                         const bitmap: *HHABitmap = &asset.?.hha.info.bitmap;
                         var point_index: u32 = 0;
                         while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
-                            if (bitmap.align_points[point_index].align_type != @intFromEnum(HHAAlignPointType.None)) {
+                            if (bitmap.align_points[point_index].align_type != @backingInt(HHAAlignPointType.None)) {
                                 align_point_unprocessed[grid_y][grid_x][point_index] = true;
                                 align_points[grid_y][grid_x][point_index] = bitmap.align_points[point_index];
                             }
@@ -1994,13 +1994,13 @@ fn parseTopLevelBlock(
             const size: i32 = tokenizer.requireIntegerRange(0, std.math.maxInt(u16)).i32;
             _ = tokenizer.requireToken(.Comma);
             const type0: Token = tokenizer.requireToken(.Identifier);
-            var align_type: u16 = @intFromEnum(file_formats.alignPointTypeFromName(type0.text));
-            if (align_type != @intFromEnum(HHAAlignPointType.None)) {
+            var align_type: u16 = @backingInt(file_formats.alignPointTypeFromName(type0.text));
+            if (align_type != @backingInt(HHAAlignPointType.None)) {
                 var type1: Token = .{};
                 if (tokenizer.optionalToken(.Or)) {
                     type1 = tokenizer.requireToken(.Identifier);
                     if (type1.equals("ToParent")) {
-                        align_type |= @intFromEnum(HHAAlignPointType.ToParent);
+                        align_type |= @backingInt(HHAAlignPointType.ToParent);
                     } else {
                         tokenizer.encounteredError(type0, "Expected \"ToParent\".", .{});
                     }

@@ -24,14 +24,14 @@ pub const BoxSurfaceIndex = enum(u32) {
     Up,
 };
 
-pub const BOX_SURFACE_INDEX_COUNT = @typeInfo(BoxSurfaceIndex).@"enum".fields.len;
+pub const BOX_SURFACE_INDEX_COUNT = @typeInfo(BoxSurfaceIndex).@"enum".field_names.len;
 
-pub const BoxMask_West: u32 = (1 << @intFromEnum(BoxSurfaceIndex.West));
-pub const BoxMask_East: u32 = (1 << @intFromEnum(BoxSurfaceIndex.East));
-pub const BoxMask_South: u32 = (1 << @intFromEnum(BoxSurfaceIndex.South));
-pub const BoxMask_North: u32 = (1 << @intFromEnum(BoxSurfaceIndex.North));
-pub const BoxMask_Down: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Down));
-pub const BoxMask_Up: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Up));
+pub const BoxMask_West: u32 = (1 << @backingInt(BoxSurfaceIndex.West));
+pub const BoxMask_East: u32 = (1 << @backingInt(BoxSurfaceIndex.East));
+pub const BoxMask_South: u32 = (1 << @backingInt(BoxSurfaceIndex.South));
+pub const BoxMask_North: u32 = (1 << @backingInt(BoxSurfaceIndex.North));
+pub const BoxMask_Down: u32 = (1 << @backingInt(BoxSurfaceIndex.Down));
+pub const BoxMask_Up: u32 = (1 << @backingInt(BoxSurfaceIndex.Up));
 
 pub const BoxSurfaceMask = enum(u32) {
     West = BoxMask_West,
@@ -80,26 +80,26 @@ pub fn getSurfaceIndex(axis_index: u32, positive: u32) BoxSurfaceIndex {
     std.debug.assert(positive <= 1);
     std.debug.assert(axis_index <= 2);
 
-    return @enumFromInt((axis_index << 1) | positive);
+    return @fromBackingInt((axis_index << 1) | positive);
 }
 
 pub fn getSurfaceIndexFromDirectionMask(direction_mask: u32) BoxSurfaceIndex {
     const scan: intrinsics.BitScanResult = intrinsics.findLeastSignificantSetBit(direction_mask);
     std.debug.assert(scan.found);
-    std.debug.assert(scan.index >= 0 and scan.index <= @intFromEnum(BoxSurfaceIndex.Up));
+    std.debug.assert(scan.index >= 0 and scan.index <= @backingInt(BoxSurfaceIndex.Up));
 
-    const result: BoxSurfaceIndex = @enumFromInt(scan.index);
+    const result: BoxSurfaceIndex = @fromBackingInt(scan.index);
     std.debug.assert(getSurfaceMaskFromSurface(result) == direction_mask);
 
     return result;
 }
 
 pub fn getSurfaceMask(axis_index: u32, positive: u32) u32 {
-    return @as(u8, 1) << @intCast(@intFromEnum(getSurfaceIndex(axis_index, positive)));
+    return @as(u8, 1) << @intCast(@backingInt(getSurfaceIndex(axis_index, positive)));
 }
 
 pub fn getSurfaceMaskFromSurface(surface_index: BoxSurfaceIndex) u32 {
-    return @as(u8, 1) << @intCast(@intFromEnum(surface_index));
+    return @as(u8, 1) << @intCast(@backingInt(surface_index));
 }
 
 pub const LightBoxSurface = struct {

@@ -29,7 +29,7 @@ fn Vector2Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();
 
-        values: @Vector(2, ScalarType),
+        values: [2]ScalarType,
 
         pub fn new(x_value: ScalarType, y_value: ScalarType) Self {
             return Self{ .values = .{ x_value, y_value } };
@@ -153,7 +153,7 @@ fn Vector3Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();
 
-        values: @Vector(3, ScalarType),
+        values: [3]ScalarType,
 
         pub fn new(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType) Self {
             return Self{ .values = .{ x_value, y_value, z_value } };
@@ -345,7 +345,7 @@ fn Vector4Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();
 
-        values: @Vector(4, ScalarType),
+        values: [4]ScalarType,
 
         pub fn new(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType, w_value: ScalarType) Self {
             return Self{ .values = .{ x_value, y_value, z_value, w_value } };
@@ -471,7 +471,7 @@ fn Color3Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();
 
-        values: @Vector(3, ScalarType),
+        values: [3]ScalarType,
 
         pub fn new(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType) Self {
             return Self{ .values = .{ x_value, y_value, z_value } };
@@ -562,7 +562,7 @@ fn Color4Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();
 
-        values: @Vector(4, ScalarType),
+        values: [4]ScalarType,
 
         pub fn new(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType, w_value: ScalarType) Self {
             return Self{ .values = .{ x_value, y_value, z_value, w_value } };
@@ -682,6 +682,8 @@ fn Color4Type(comptime ScalarType: type) type {
 }
 
 fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: type, comptime Self: type) type {
+    const VectorType = @Vector(dimension_count, ScalarType);
+
     return struct {
         pub fn valueAt(self: Self, index: usize) ScalarType {
             const array: [dimension_count]ScalarType = self.values;
@@ -719,19 +721,19 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub fn plus(self: *const Self, b: Self) Self {
-            return Self{ .values = self.values + b.values };
+            return Self{ .values = @as(VectorType, self.values) + @as(VectorType, b.values) };
         }
 
         pub fn minus(self: *const Self, b: Self) Self {
-            return Self{ .values = self.values - b.values };
+            return Self{ .values = @as(VectorType, self.values) - @as(VectorType, b.values) };
         }
 
         pub fn times(self: *const Self, b: Self) Self {
-            return Self{ .values = self.values * b.values };
+            return Self{ .values = @as(VectorType, self.values) * @as(VectorType, b.values) };
         }
 
         pub fn dividedBy(self: *const Self, b: Self) Self {
-            return Self{ .values = self.values / b.values };
+            return Self{ .values = @as(VectorType, self.values) / @as(VectorType, b.values) };
         }
 
         pub fn dividedByF(self: *const Self, scalar: ScalarType) Self {
@@ -743,7 +745,7 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub fn scaledTo(self: *const Self, scalar: ScalarType) Self {
-            return Self{ .values = self.values * @as(@TypeOf(self.values), @splat(scalar)) };
+            return Self{ .values = @as(VectorType, self.values) * @as(VectorType, @splat(scalar)) };
         }
 
         pub fn clamp01(self: *const Self) Self {
@@ -758,15 +760,15 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub fn negated(self: *const Self) Self {
-            return Self{ .values = -self.values };
+            return Self{ .values = -@as(VectorType, self.values) };
         }
 
         pub fn dotProduct(self: *const Self, b: Self) ScalarType {
-            return @reduce(.Add, self.values * b.values);
+            return @reduce(.Add, @as(VectorType, self.values) * @as(VectorType, b.values));
         }
 
         pub fn hadamardProduct(self: *const Self, b: Self) Self {
-            return Self{ .values = self.values * b.values };
+            return Self{ .values = @as(VectorType, self.values) * @as(VectorType, b.values) };
         }
 
         pub fn lengthSquared(self: *const Self) ScalarType {
@@ -782,7 +784,10 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub fn lerp(from: Self, to: Self, time: ScalarType) Self {
-            return Self{ .values = from.values + @as(@TypeOf(from.values), @splat(time)) * (to.values - from.values) };
+            return Self{
+                .values = @as(VectorType, from.values) +
+                    @as(VectorType, @splat(time)) * (@as(VectorType, to.values) - @as(VectorType, from.values)),
+            };
         }
 
         pub fn normalized(self: Self) Self {

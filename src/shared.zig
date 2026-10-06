@@ -507,19 +507,20 @@ fn outChars(dest: *FormatDest, value_in: [*]const u8) void {
 fn readVarArgUnsignedInteger(args: anytype, index: *u32) u64 {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
-    const fields_info = args_type_info.@"struct".fields;
+    const fields_names = args_type_info.@"struct".field_names;
 
     var result: u64 = 0;
-    inline for (fields_info, 0..) |field, i| {
+    inline for (fields_names, 0..) |field_name, i| {
         if (i == index.*) {
-            switch (field.type) {
+            const field_type = args_type_info.@"struct".field_types[i];
+            switch (field_type) {
                 u8, u16, u32, u64, usize => {
                     index.* += 1;
-                    result = @field(args, field.name);
+                    result = @field(args, field_name);
                 },
                 i8, i16, i32 => {
                     index.* += 1;
-                    const value = @field(args, field.name);
+                    const value = @field(args, field_name);
                     if (value >= 0) {
                         result = @intCast(value);
                     } else {
@@ -544,15 +545,16 @@ fn readVarArgSignedInteger(args: anytype, index: *u32) i64 {
 fn readVarArgFloat(args: anytype, index: *u32) f64 {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
-    const fields_info = args_type_info.@"struct".fields;
+    const fields_name = args_type_info.@"struct".field_names;
 
     var result: f64 = 0;
-    inline for (fields_info, 0..) |field, i| {
+    inline for (fields_name, 0..) |field_name, i| {
         if (i == index.*) {
-            switch (field.type) {
+            const field_type = args_type_info.@"struct".field_types[i];
+            switch (field_type) {
                 f32, f64 => {
                     index.* += 1;
-                    result = @field(args, field.name);
+                    result = @field(args, field_name);
                 },
                 else => |t| {
                     @panic("Unexpected argument type, expected float type. Got: " ++ @typeName(t));
@@ -567,7 +569,7 @@ fn readVarArgFloat(args: anytype, index: *u32) f64 {
 pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]const u8, args: anytype) usize {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
-    const fields_info = args_type_info.@"struct".fields;
+    const field_names = args_type_info.@"struct".field_names;
     var arg_index: u32 = 0;
 
     var dest: FormatDest = .{ .at = dest_init, .size = dest_size };
@@ -605,10 +607,11 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                 var width_specified: bool = false;
                 var width: i32 = 0;
                 if (at[0] == '*') {
-                    if (fields_info.len > arg_index) {
-                        inline for (fields_info, 0..) |field, i| {
-                            if (i == arg_index and field.type == i32) {
-                                width = @field(args, field.name);
+                    if (field_names.len > arg_index) {
+                        inline for (field_names, 0..) |field_name, i| {
+                            const field_type = args_type_info.@"struct".field_types[i];
+                            if (i == arg_index and field_type == i32) {
+                                width = @field(args, field_name);
                                 width_specified = true;
                                 arg_index += 1;
                             }
@@ -626,10 +629,11 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                 if (at[0] == '.') {
                     at += 1;
                     if (at[0] == '*') {
-                        if (fields_info.len > arg_index) {
-                            inline for (fields_info, 0..) |field, i| {
-                                if (i == arg_index and field.type == i32) {
-                                    precision = @field(args, field.name);
+                        if (field_names.len > arg_index) {
+                            inline for (field_names, 0..) |field_name, i| {
+                                const field_type = args_type_info.@"struct".field_types[i];
+                                if (i == arg_index and field_type == i32) {
+                                    precision = @field(args, field_name);
                                     precision_specified = true;
                                     arg_index += 1;
                                 }
@@ -743,11 +747,12 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         is_float = true;
                     },
                     'c' => {
-                        if (fields_info.len > arg_index) {
+                        if (field_names.len > arg_index) {
                             var value: u8 = 0;
-                            inline for (fields_info, 0..) |field, i| {
-                                if (i == arg_index and field.type == u8) {
-                                    value = @field(args, field.name);
+                            inline for (field_names, 0..) |field_name, i| {
+                                const field_type = args_type_info.@"struct".field_types[i];
+                                if (i == arg_index and field_type == u8) {
+                                    value = @field(args, field_name);
                                     outChar(&temp_dest, value);
                                 }
                             }
@@ -755,20 +760,21 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         }
                     },
                     's' => {
-                        if (fields_info.len > arg_index) {
+                        if (field_names.len > arg_index) {
                             var value: [*]const u8 = "";
-                            inline for (fields_info, 0..) |field, i| {
+                            inline for (field_names, 0..) |field_name, i| {
+                                const field_type = args_type_info.@"struct".field_types[i];
                                 if (i == arg_index) {
-                                    if (field.type == [*:0]const u8 or
-                                        field.type == [*]const u8 or
-                                        field.type == [*]u8)
+                                    if (field_type == [*:0]const u8 or
+                                        field_type == [*]const u8 or
+                                        field_type == [*]u8)
                                     {
-                                        value = @field(args, field.name);
-                                    } else if (field.type == [:0]const u8 or
-                                        field.type == []const u8 or
-                                        field.type == []u8)
+                                        value = @field(args, field_name);
+                                    } else if (field_type == [:0]const u8 or
+                                        field_type == []const u8 or
+                                        field_type == []u8)
                                     {
-                                        value = @field(args, field.name).ptr;
+                                        value = @field(args, field_name).ptr;
                                     }
 
                                     temp = @constCast(value);
@@ -790,12 +796,13 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         }
                     },
                     'S' => {
-                        if (fields_info.len > arg_index) {
+                        if (field_names.len > arg_index) {
                             var value: String = .empty;
-                            inline for (fields_info, 0..) |field, i| {
+                            inline for (field_names, 0..) |field_name, i| {
+                                const field_type = args_type_info.@"struct".field_types[i];
                                 if (i == arg_index) {
-                                    if (field.type == String) {
-                                        value = @field(args, field.name);
+                                    if (field_type == String) {
+                                        value = @field(args, field_name);
                                     }
 
                                     temp = @constCast(value.data);
@@ -812,11 +819,12 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         }
                     },
                     'p' => {
-                        if (fields_info.len > arg_index) {
+                        if (field_names.len > arg_index) {
                             var value: usize = 0;
-                            inline for (fields_info, 0..) |field, i| {
-                                if (i == arg_index and field.type == @TypeOf(value)) {
-                                    value = @field(args, field.name);
+                            inline for (field_names, 0..) |field_name, i| {
+                                const field_type = args_type_info.@"struct".field_types[i];
+                                if (i == arg_index and field_type == @TypeOf(value)) {
+                                    value = @field(args, field_name);
                                     u64ToASCII(&temp_dest, @intCast(value), 16, lower_hex_chars);
                                 }
                             }
@@ -824,11 +832,12 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         }
                     },
                     'n' => {
-                        if (fields_info.len > arg_index) {
+                        if (field_names.len > arg_index) {
                             var value: *i32 = undefined;
-                            inline for (fields_info, 0..) |field, i| {
-                                if (i == arg_index and field.type == @TypeOf(value)) {
-                                    value = @field(args, field.name);
+                            inline for (field_names, 0..) |field_name, i| {
+                                const field_type = args_type_info.@"struct".field_types[i];
+                                if (i == arg_index and field_type == @TypeOf(value)) {
+                                    value = @field(args, field_name);
                                     value.* = dest.at - &dest_init;
                                 }
                             }
@@ -1109,7 +1118,7 @@ pub const SoundOutputBuffer = extern struct {
     sample_count: u32,
 };
 
-pub const MOUSE_BUTTON_COUNT = @typeInfo(GameInputMouseButton).@"enum".fields.len;
+pub const MOUSE_BUTTON_COUNT = @typeInfo(GameInputMouseButton).@"enum".field_names.len;
 pub const GameInputMouseButton = enum(u8) {
     Left,
     Middle,
@@ -1118,7 +1127,7 @@ pub const GameInputMouseButton = enum(u8) {
     Extended1,
 
     pub fn toInt(self: GameInputMouseButton) u32 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -1233,7 +1242,7 @@ pub const Memory = struct {
     executable_reloaded: bool = false,
 };
 
-pub const DEV_MODE_COUNT = @typeInfo(DevMode).@"enum".fields.len;
+pub const DEV_MODE_COUNT = @typeInfo(DevMode).@"enum".field_names.len;
 pub const DevMode = enum(u32) {
     None,
 
@@ -1298,14 +1307,14 @@ pub const State = struct {
     }
 };
 
-pub const GameMode = enum {
+pub const GameMode = enum(u32) {
     None,
     TitleScreen,
     Cutscene,
     World,
 };
 
-const GameModeUnion = enum {
+const GameModeUnion = enum(u32) {
     title_screen,
     cutscene,
     world,

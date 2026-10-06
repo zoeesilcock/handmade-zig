@@ -4,11 +4,7 @@ const std = @import("std");
 const math = @import("math");
 const lane = @import("ray_lane.zig");
 const win32 = if (PLATFORM == .windows) @import("ray_win32.zig") else @panic("Unsupported platform");
-
-const c = @cImport({
-    @cInclude("math.h");
-    @cInclude("time.h");
-});
+const c = @import("c");
 
 const PLATFORM = @import("builtin").os.tag;
 const LANE_WIDTH = lane.LANE_WIDTH;

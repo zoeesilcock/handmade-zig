@@ -7,7 +7,7 @@ pub const LIGHT_SAMPLING_SPHERE_COUNT = 16;
 pub const LIGHT_SAMPLING_SPHERE_MASK = 15;
 pub const LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE = 18;
 pub const LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE = 4 * LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE;
-pub const LightSamplingSphere = extern struct {
+pub const LightSamplingSphere = struct {
     sample_direction: [LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE]V3_4x = @splat(.splat(@splat(0))),
     cube_side_weight: [LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE][6]f32 = @splat(@splat(0)),
 };

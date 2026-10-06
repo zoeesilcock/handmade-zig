@@ -331,7 +331,7 @@ fn getFileByPath(
 
     var data: win32.WIN32_FILE_ATTRIBUTE_DATA = undefined;
     if (win32.GetFileAttributesExW(path_16, win32.GetFileExInfoStandard, &data) != 0 or
-        (mode_flags & @intFromEnum(shared.OpenFileModeFlags.Write) != 0))
+        (mode_flags & @backingInt(shared.OpenFileModeFlags.Write) != 0))
     {
         result = allocateFileInfo(file_group, &data);
         result.?.base_name = @constCast(path);
@@ -353,14 +353,14 @@ fn openFile(
 
     var handle_permissions: std.os.windows.DWORD = 0;
     var handle_creation: std.os.windows.DWORD = 0;
-    if (mode_flags & @intFromEnum(shared.OpenFileModeFlags.Read) != 0) {
+    if (mode_flags & @backingInt(shared.OpenFileModeFlags.Read) != 0) {
         handle_permissions |= @bitCast(win32.FILE_GENERIC_READ);
-        handle_creation = @intFromEnum(win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING);
+        handle_creation = @backingInt(win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING);
     }
 
-    if (mode_flags & @intFromEnum(shared.OpenFileModeFlags.Write) != 0) {
+    if (mode_flags & @backingInt(shared.OpenFileModeFlags.Write) != 0) {
         handle_permissions |= @bitCast(win32.FILE_GENERIC_WRITE);
-        handle_creation = @intFromEnum(win32.FILE_CREATION_DISPOSITION.OPEN_ALWAYS);
+        handle_creation = @backingInt(win32.FILE_CREATION_DISPOSITION.OPEN_ALWAYS);
     }
 
     const file_name: [*:0]const u16 = @ptrCast(@alignCast(file_info.platform));
@@ -369,7 +369,7 @@ fn openFile(
         @bitCast(handle_permissions),
         win32.FILE_SHARE_READ,
         null,
-        @enumFromInt(handle_creation),
+        @fromBackingInt(handle_creation),
         win32.FILE_FLAGS_AND_ATTRIBUTES{},
         null,
     );
@@ -417,7 +417,7 @@ fn readDataFromFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, 
             // File read successfully.
         } else {
             const error_number = win32.GetLastError();
-            std.debug.print("Error loading file: {d}\n", .{@intFromEnum(error_number)});
+            std.debug.print("Error loading file: {d}\n", .{@backingInt(error_number)});
             fileError(handle, "Read file failed.");
         }
     }
@@ -454,7 +454,7 @@ fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, s
             // File written successfully.
         } else {
             const error_number = win32.GetLastError();
-            std.debug.print("Error writing to file: {d}\n", .{@intFromEnum(error_number)});
+            std.debug.print("Error writing to file: {d}\n", .{@backingInt(error_number)});
             fileError(handle, "Write to file failed.");
         }
     }
@@ -558,11 +558,11 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBl
     var total_size: MemoryIndex = size + @sizeOf(MemoryBlock);
     var base_offset: MemoryIndex = @sizeOf(MemoryBlock);
     var protected_offset: MemoryIndex = 0;
-    if (flags & @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) != 0) {
+    if (flags & @backingInt(PlatformMemoryBlockFlags.UnderflowCheck) != 0) {
         total_size = size + 2 * page_size;
         base_offset = 2 * page_size;
         protected_offset = page_size;
-    } else if (flags & @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) != 0) {
+    } else if (flags & @backingInt(PlatformMemoryBlockFlags.OverflowCheck) != 0) {
         const size_rounded_up: MemoryIndex = types.alignPow2(@intCast(size), page_size);
         total_size = size_rounded_up + 2 * page_size;
         base_offset = page_size + size_rounded_up - size;
@@ -585,8 +585,8 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBl
         std.debug.assert(block.block.arena_prev == null);
 
         if (flags &
-            (@intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) |
-                @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck)) != 0)
+            (@backingInt(PlatformMemoryBlockFlags.UnderflowCheck) |
+                @backingInt(PlatformMemoryBlockFlags.OverflowCheck)) != 0)
         {
             var old_protect: win32.PAGE_PROTECTION_FLAGS = undefined;
             const protected = win32.VirtualProtect(
@@ -604,8 +604,8 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBl
         block.block.flags = flags;
         block.looping_flags = 0;
 
-        if (isInLoop() and (flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
-            block.looping_flags = @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping);
+        if (isInLoop() and (flags & @backingInt(PlatformMemoryBlockFlags.NotRestored)) == 0) {
+            block.looping_flags = @backingInt(MemoryBlockLoopingFlag.AllocatedDuringLooping);
         }
 
         global_state.memory_mutex.begin();
@@ -636,8 +636,8 @@ fn freeMemoryBlock(block: *MemoryBlock) void {
 fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) void {
     if (opt_platform_block) |platform_block| {
         var block: *MemoryBlock = @ptrCast(platform_block);
-        if (isInLoop() and (platform_block.flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
-            block.looping_flags = @intFromEnum(MemoryBlockLoopingFlag.FreedDuringLooping);
+        if (isInLoop() and (platform_block.flags & @backingInt(PlatformMemoryBlockFlags.NotRestored)) == 0) {
+            block.looping_flags = @backingInt(MemoryBlockLoopingFlag.FreedDuringLooping);
         } else {
             freeMemoryBlock(block);
         }
@@ -699,7 +699,7 @@ const DebugFunctions = if (INTERNAL) struct {
             }
         } else {
             h_process.* = win32.INVALID_HANDLE_VALUE;
-            std.debug.print("Error executing system command: {d}\n", .{@intFromEnum(win32.GetLastError())});
+            std.debug.print("Error executing system command: {d}\n", .{@backingInt(win32.GetLastError())});
         }
 
         return result;
@@ -843,10 +843,10 @@ fn unloadGameCode(game: *Game) void {
 }
 
 fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(.winapi) isize {
-    return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
+    return @backingInt(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
 fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize {
-    return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
+    return @backingInt(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
 var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(.winapi) isize = XInputGetStateStub;
 var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize = XInputSetStateStub;
@@ -896,9 +896,9 @@ fn processMouseInput(
             0, // TODO: Add mouse wheel support.
         );
 
-        new_input.shift_down = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
-        new_input.alt_down = win32.GetKeyState(@intFromEnum(win32.VK_MENU)) & (1 << 7) != 0;
-        new_input.control_down = win32.GetKeyState(@intFromEnum(win32.VK_CONTROL)) & (1 << 7) != 0;
+        new_input.shift_down = win32.GetKeyState(@backingInt(win32.VK_SHIFT)) & (1 << 7) != 0;
+        new_input.alt_down = win32.GetKeyState(@backingInt(win32.VK_MENU)) & (1 << 7) != 0;
+        new_input.control_down = win32.GetKeyState(@backingInt(win32.VK_CONTROL)) & (1 << 7) != 0;
     }
 
     const win_button_ids = [_]win32.VIRTUAL_KEY{
@@ -916,7 +916,7 @@ fn processMouseInput(
 
         processKeyboardInputMessage(
             &new_input.mouse_buttons[button_index],
-            win32.GetKeyState(@intFromEnum(win_button_ids[button_index])) & (1 << 7) != 0,
+            win32.GetKeyState(@backingInt(win_button_ids[button_index])) & (1 << 7) != 0,
         );
     }
 }
@@ -947,7 +947,7 @@ fn processXInput(
         if (xbox_controller_present[controller_index]) {
             dwResult = XInputGetState(controller_index, &controller_state);
 
-            if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
+            if (dwResult == @backingInt(win32.ERROR_SUCCESS)) {
                 // Controller is connected
                 const pad = &controller_state.Gamepad;
                 new_controller.is_connected = true;
@@ -1169,7 +1169,7 @@ fn processKeyboardInput(
 ) void {
     const vk_code = message.wParam;
     const alt_was_down: bool = if ((message.lParam & (1 << 29) != 0)) true else false;
-    // const shift_was_down: bool = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
+    // const shift_was_down: bool = win32.GetKeyState(@backingInt(win32.VK_SHIFT)) & (1 << 7) != 0;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
     const is_down: bool = if ((message.lParam & @as(isize, @intCast(1 << 31)) == 0)) true else false;
 
@@ -1193,28 +1193,28 @@ fn processKeyboardInput(
             'E' => {
                 processKeyboardInputMessage(&keyboard_controller.right_shoulder, is_down);
             },
-            @intFromEnum(win32.VK_UP) => {
+            @backingInt(win32.VK_UP) => {
                 processKeyboardInputMessage(&keyboard_controller.action_up, is_down);
             },
-            @intFromEnum(win32.VK_DOWN) => {
+            @backingInt(win32.VK_DOWN) => {
                 processKeyboardInputMessage(&keyboard_controller.action_down, is_down);
             },
-            @intFromEnum(win32.VK_LEFT) => {
+            @backingInt(win32.VK_LEFT) => {
                 processKeyboardInputMessage(&keyboard_controller.action_left, is_down);
             },
-            @intFromEnum(win32.VK_RIGHT) => {
+            @backingInt(win32.VK_RIGHT) => {
                 processKeyboardInputMessage(&keyboard_controller.action_right, is_down);
             },
-            @intFromEnum(win32.VK_ESCAPE) => {
+            @backingInt(win32.VK_ESCAPE) => {
                 processKeyboardInputMessage(&keyboard_controller.back_button, is_down);
             },
-            @intFromEnum(win32.VK_SPACE), @intFromEnum(win32.VK_SHIFT) => {
+            @backingInt(win32.VK_SPACE), @backingInt(win32.VK_SHIFT) => {
                 const either_down: bool =
-                    (win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0) or
-                    (win32.GetKeyState(@intFromEnum(win32.VK_SPACE)) & (1 << 7) != 0);
+                    (win32.GetKeyState(@backingInt(win32.VK_SHIFT)) & (1 << 7) != 0) or
+                    (win32.GetKeyState(@backingInt(win32.VK_SPACE)) & (1 << 7) != 0);
                 keyboard_controller.clutch_max = if (either_down) 1 else 0;
             },
-            @intFromEnum(win32.VK_RETURN) => {
+            @backingInt(win32.VK_RETURN) => {
                 if (is_down and alt_was_down) {
                     if (message.hwnd) |window| {
                         toggleFullscreen(window);
@@ -1244,12 +1244,12 @@ fn processKeyboardInput(
                     }
                 }
             },
-            @intFromEnum(win32.VK_F1)...@intFromEnum(win32.VK_F12) => {
+            @backingInt(win32.VK_F1)...@backingInt(win32.VK_F12) => {
                 if (is_down) {
-                    if (alt_was_down and vk_code == @intFromEnum(win32.VK_F4)) {
+                    if (alt_was_down and vk_code == @backingInt(win32.VK_F4)) {
                         running = false;
                     } else {
-                        input.f_key_pressed[vk_code - @intFromEnum(win32.VK_F1) + 1] = true;
+                        input.f_key_pressed[vk_code - @backingInt(win32.VK_F1) + 1] = true;
                     }
                 }
             },
@@ -1459,7 +1459,7 @@ fn windowProcedure(
             running = false;
         },
         win32.WM_WINDOWPOSCHANGING => {
-            if (win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0) {
+            if (win32.GetKeyState(@backingInt(win32.VK_SHIFT)) & (1 << 7) != 0) {
                 var new_pos: *win32.WINDOWPOS = @ptrFromInt(@as(usize, @intCast(l_param)));
                 var window_rect: win32.RECT = undefined;
                 var client_rect: win32.RECT = undefined;
@@ -1676,7 +1676,7 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
         global_state.memory_mutex.begin();
         var source_block = sentinel.next;
         while (source_block != sentinel) : (source_block = source_block.next) {
-            if ((source_block.block.flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
+            if ((source_block.block.flags & @backingInt(PlatformMemoryBlockFlags.NotRestored)) == 0) {
                 const base_pointer = source_block.block.base;
                 var dest_block: SavedMemoryBlock = .{
                     .base_pointer = @intFromPtr(base_pointer),
@@ -1740,7 +1740,7 @@ fn clearBlocksByMask(state: *Win32State, mask: u64) void {
 }
 
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
-    clearBlocksByMask(state, @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping));
+    clearBlocksByMask(state, @backingInt(MemoryBlockLoopingFlag.AllocatedDuringLooping));
 
     var file_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
@@ -1797,7 +1797,7 @@ fn playbackInput(state: *Win32State, new_input: *shared.GameInput) void {
 }
 
 fn endInputPlayback(state: *Win32State) void {
-    clearBlocksByMask(state, @intFromEnum(MemoryBlockLoopingFlag.FreedDuringLooping));
+    clearBlocksByMask(state, @backingInt(MemoryBlockLoopingFlag.FreedDuringLooping));
 
     _ = win32.CloseHandle(state.playback_handle);
     state.input_playing_index = 0;
@@ -1910,12 +1910,12 @@ fn outputLastError(title: []const u8) void {
     const last_error = win32.GetLastError();
 
     if (INTERNAL) {
-        std.debug.print("{s}: {d}\n", .{ title, @intFromEnum(last_error) });
+        std.debug.print("{s}: {d}\n", .{ title, @backingInt(last_error) });
     } else {
         var buffer: [128]u8 = undefined;
         const length = shared.formatString(buffer.len, &buffer, "%s: %d\n", .{
             title,
-            @intFromEnum(last_error),
+            @backingInt(last_error),
         });
         win32.OutputDebugStringA(@ptrCast(buffer[0..length]));
     }
@@ -1970,7 +1970,7 @@ fn fullRestart(source_exe: [*:0]const u8, dest_exe: [*:0]const u8, delete_exe: [
                     _ = win32.CloseHandle(process_handle);
                 }
             } else {
-                std.log.err("Error performing full restart: {d}", .{@intFromEnum(win32.GetLastError())});
+                std.log.err("Error performing full restart: {d}", .{@backingInt(win32.GetLastError())});
             }
 
             win32.ExitProcess(0);
@@ -1978,9 +1978,19 @@ fn fullRestart(source_exe: [*:0]const u8, dest_exe: [*:0]const u8, delete_exe: [
     }
 }
 
+/// This is needed for it to work when lib_c is linked.
+pub export fn wWinMain(
+    instance: win32.HINSTANCE,
+    prev_instance: ?win32.HINSTANCE,
+    cmd_line: ?win32.PWSTR,
+    cmd_show: c_int,
+) callconv(.winapi) c_int {
+    return WinMain(instance, prev_instance, cmd_line, cmd_show);
+}
+
 // pub export fn wWinMainCRTStartup() callconv(.c) c_int {
 //     const instance: ?win32.HINSTANCE = win32.GetModuleHandleW(null);
-pub export fn wWinMain(
+pub export fn WinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
     cmd_line: ?win32.PWSTR,

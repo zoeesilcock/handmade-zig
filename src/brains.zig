@@ -102,7 +102,7 @@ pub const BrainSlot = extern struct {
 
     pub fn forField(comptime slot_type: type, comptime field_name: []const u8) BrainSlot {
         const brain_type_name: []const u8 = comptime shared.shortTypeName(slot_type);
-        const brain_type: u16 = @intFromEnum(@field(BrainType, brain_type_name));
+        const brain_type: u16 = @backingInt(@field(BrainType, brain_type_name));
         const pack_value: u16 = @offsetOf(slot_type, field_name) / @sizeOf(*Entity);
         return BrainSlot{ .type = brain_type, .index = pack_value };
     }
@@ -114,12 +114,12 @@ pub const BrainSlot = extern struct {
     }
 
     pub fn forSpecialBrain(brain_type: BrainType) BrainSlot {
-        const slot: BrainSlot = .{ .type = @intFromEnum(brain_type), .index = 0 };
+        const slot: BrainSlot = .{ .type = @backingInt(brain_type), .index = 0 };
         return slot;
     }
 
     pub fn isType(self: BrainSlot, brain_type: BrainType) bool {
-        return self.index != 0 and self.type == @intFromEnum(brain_type);
+        return self.index != 0 and self.type == @backingInt(brain_type);
     }
 };
 
@@ -166,7 +166,7 @@ fn executeBrainHero(
 
     if (opt_input) |input| {
         if (opt_state) |state| {
-            const controller_index: u32 = brain.id.value - @intFromEnum(ReservedBrainId.FirstHero);
+            const controller_index: u32 = brain.id.value - @backingInt(ReservedBrainId.FirstHero);
             const controller: *shared.ControllerInput = input.getController(controller_index);
             controlled_hero = &state.controlled_heroes[controller_index];
             clutch_level = controller.clutch_max;
@@ -310,7 +310,7 @@ fn executeBrainHero(
                     sim_region,
                     hop_target_position,
                     &traversable,
-                    @intFromEnum(TraversableSearchFlag.ClippedZ),
+                    @backingInt(TraversableSearchFlag.ClippedZ),
                 )) {
                     if (!traversable.equals(body.occupying)) {
                         body.came_from = body.occupying;

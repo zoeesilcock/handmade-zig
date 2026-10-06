@@ -76,8 +76,8 @@ pub fn parseWAV(arena: *MemoryArena, contents: Buffer, errors: *Stream) SoundI16
     var header: RiffHeader = undefined;
     var iterator: RiffIterator = .iterateRiff(contents, &header);
 
-    if (header.riff_id == @intFromEnum(RiffId.RIFF) and
-        header.file_type_id == @intFromEnum(WaveChunkId.ChunkID_WAVE))
+    if (header.riff_id == @backingInt(RiffId.RIFF) and
+        header.file_type_id == @backingInt(WaveChunkId.ChunkID_WAVE))
     {
         var channel_count: ?u16 = null;
         var sample_data: ?[*]i16 = null;
@@ -85,7 +85,7 @@ pub fn parseWAV(arena: *MemoryArena, contents: Buffer, errors: *Stream) SoundI16
 
         while (iterator.isValid()) : (iterator = iterator.nextChunk()) {
             if (iterator.getType()) |chunk_type_u32| {
-                const chunk_type: WaveChunkId = @enumFromInt(chunk_type_u32);
+                const chunk_type: WaveChunkId = @fromBackingInt(chunk_type_u32);
                 switch (chunk_type) {
                     .ChunkID_fmt => {
                         const fmt: *WaveFmt = @ptrCast(@alignCast(iterator.getChunkData()));

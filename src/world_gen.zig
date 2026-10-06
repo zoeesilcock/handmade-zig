@@ -63,7 +63,7 @@ const GenOptionIterator = struct {
 
     pub fn iterateOptions(gen: *WorldGenerator, option_type: GenOptionType) GenOptionIterator {
         var result: GenOptionIterator = .{};
-        const array: *GenOptionArray = &gen.option_arrays[@intFromEnum(option_type)];
+        const array: *GenOptionArray = &gen.option_arrays[@backingInt(option_type)];
         if (array.option_count > 0) {
             array.option_count -= 1;
             result.room = array.options[array.option_count].room;
@@ -91,7 +91,7 @@ const GenOptionArray = struct {
     option_count: u32,
 };
 
-const GEN_OPTION_TYPE_COUNT = @typeInfo(GenOptionType).@"enum".fields.len;
+const GEN_OPTION_TYPE_COUNT = @typeInfo(GenOptionType).@"enum".field_names.len;
 const GenOptionType = enum(u32) {
     None,
     Cat,
@@ -326,7 +326,7 @@ fn addRoomConnection(gen: *WorldGenerator, room: *GenRoom, connection: *GenConne
 }
 
 fn connectByMask(gen: *WorldGenerator, a: *GenRoom, b: *GenRoom, opt_direction_mask: ?u32) *GenConnection {
-    const direction_mask: u32 = opt_direction_mask orelse @intFromEnum(box_mod.BoxSurfaceMask.Planar);
+    const direction_mask: u32 = opt_direction_mask orelse @backingInt(box_mod.BoxSurfaceMask.Planar);
     var connection: *GenConnection = gen.memory.pushStruct(GenConnection, null, @src());
 
     connection.direction_from_a_mask = direction_mask;
@@ -354,7 +354,7 @@ fn setSize(gen: *WorldGenerator, spec: *GenRoomSpec, dim_x: i32, dim_y: i32, opt
 }
 
 fn addOption(gen: *WorldGenerator, room: *GenRoom, option_type: GenOptionType) *GenOption {
-    const array: *GenOptionArray = &gen.option_arrays[@intFromEnum(option_type)];
+    const array: *GenOptionArray = &gen.option_arrays[@backingInt(option_type)];
 
     std.debug.assert(array.option_count <= array.max_option_count);
 
@@ -695,8 +695,8 @@ fn getRandomDirectionFromMask(gen: *WorldGenerator, direction_mask: u32) BoxSurf
     var directions: [6]BoxSurfaceIndex = undefined;
     var direction_index: u32 = 0;
     while (direction_index < directions.len) : (direction_index += 1) {
-        if (direction_mask & (box_mod.getSurfaceMaskFromSurface(@enumFromInt(direction_index))) != 0) {
-            directions[direction_count] = @enumFromInt(direction_index);
+        if (direction_mask & (box_mod.getSurfaceMaskFromSurface(@fromBackingInt(direction_index))) != 0) {
+            directions[direction_count] = @fromBackingInt(direction_index);
             direction_count += 1;
         }
     }
@@ -808,7 +808,7 @@ fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
             const room: *GenRoom = genRoom(gen, dungeon_spec, "Dungeon Path");
             chain[path_index] = room;
 
-            _ = connectByMask(gen, prev_room, room, @intFromEnum(BoxSurfaceMask.Planar));
+            _ = connectByMask(gen, prev_room, room, @backingInt(BoxSurfaceMask.Planar));
             prev_room = room;
 
             _ = placeSnake(gen, room);
@@ -821,7 +821,7 @@ fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
             gen,
             chain[gen.entropy.randomChoice(@intCast(path_count))],
             shop,
-            @intFromEnum(BoxSurfaceMask.Planar),
+            @backingInt(BoxSurfaceMask.Planar),
         );
 
         const item_room: *GenRoom = genRoom(gen, dungeon_spec, "Item Room");
@@ -829,11 +829,11 @@ fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
             gen,
             chain[gen.entropy.randomChoice(@intCast(path_count))],
             item_room,
-            @intFromEnum(BoxSurfaceMask.Planar),
+            @backingInt(BoxSurfaceMask.Planar),
         );
 
         const floor_exit_room: *GenRoom = genRoom(gen, dungeon_spec, "Floor Exit");
-        _ = connectByMask(gen, prev_room, floor_exit_room, @intFromEnum(BoxSurfaceMask.Planar));
+        _ = connectByMask(gen, prev_room, floor_exit_room, @backingInt(BoxSurfaceMask.Planar));
 
         opt_room_above = floor_exit_room;
     }

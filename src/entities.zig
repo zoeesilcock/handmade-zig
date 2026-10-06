@@ -74,7 +74,7 @@ pub const EntityFlags = enum(u32) {
     Active = (1 << 2),
 
     pub fn toInt(self: EntityFlags) u32 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -116,7 +116,7 @@ pub const EntityVisiblePiece = extern struct {
 
     pub fn isBitmap(self: *EntityVisiblePiece) bool {
         return (self.flags &
-            (@intFromEnum(EntityVisiblePieceFlag.Cube) | @intFromEnum(EntityVisiblePieceFlag.Light))) == 0;
+            (@backingInt(EntityVisiblePieceFlag.Cube) | @backingInt(EntityVisiblePieceFlag.Light))) == 0;
     }
 };
 
@@ -547,26 +547,26 @@ pub fn updateAndRenderEntities(
 
                     var x_axis: Vector2 = .new(1, 0);
                     var y_axis: Vector2 = .new(0, 1);
-                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.AxesDeform) != 0) {
+                    if (piece.flags & @backingInt(EntityVisiblePieceFlag.AxesDeform) != 0) {
                         x_axis = entity.x_axis;
                         y_axis = entity.y_axis;
                     }
 
                     var bob_time: f32 = 0;
                     var offset: Vector3 = .zero();
-                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.BobOffset) != 0) {
+                    if (piece.flags & @backingInt(EntityVisiblePieceFlag.BobOffset) != 0) {
                         bob_time = entity.bob_time;
                         offset = entity.floor_displace.toVector3(0);
                         _ = offset.setY(offset.y() + bob_time);
                     }
 
                     var color: Color = piece.color;
-                    _ = color.setA(color.a() * (1.0 - 0.5 * match_vector.e[@intFromEnum(AssetTagId.Ghost)]));
+                    _ = color.setA(color.a() * (1.0 - 0.5 * match_vector.e[@backingInt(AssetTagId.Ghost)]));
 
                     const dev_id: types.DevId = .fromU32s(entity.id.value, piece_index, @src());
                     const highlighted: bool = dev_id.equals(hit_test.highlight_id);
 
-                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Light) != 0) {
+                    if (piece.flags & @backingInt(EntityVisiblePieceFlag.Light) != 0) {
                         asset_rendering.pushCubeLight(
                             render_group,
                             entity_ground_point.plus(piece.offset),
@@ -574,7 +574,7 @@ pub fn updateAndRenderEntities(
                             color.rgb(),
                             color.a(),
                         );
-                    } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
+                    } else if (piece.flags & @backingInt(EntityVisiblePieceFlag.Cube) != 0) {
                         asset_rendering.pushCubeBitmapId(
                             render_group,
                             bitmap_id,
@@ -594,7 +594,7 @@ pub fn updateAndRenderEntities(
                                     @as(f32, @floatFromInt(bitmap_info.orig_dim[1])) / 1024;
 
                                 const child_align: HHAAlignPoint = bitmap_info.findAlign(
-                                    bitmap_piece.child_align_type | @intFromEnum(HHAAlignPointType.ToParent),
+                                    bitmap_piece.child_align_type | @backingInt(HHAAlignPointType.ToParent),
                                 );
                                 height_ratio *= child_align.getSize();
 

@@ -7,9 +7,7 @@ const png = shared.png;
 const memory = png.memory;
 const stream = shared.stream;
 const file_formats = shared.file_formats;
-const c = @cImport({
-    @cInclude("stdlib.h");
-});
+const c = @import("c");
 
 pub const UNICODE = true;
 
@@ -348,11 +346,11 @@ fn extractFont(
         0,
         0,
         0,
-        @intFromEnum(win32.graphics.gdi.FW_NORMAL),
+        @backingInt(win32.graphics.gdi.FW_NORMAL),
         0,
         0,
         0,
-        @intFromEnum(win32.graphics.gdi.DEFAULT_CHARSET),
+        @backingInt(win32.graphics.gdi.DEFAULT_CHARSET),
         .DEFAULT_PRECIS,
         win32.graphics.gdi.CLIP_DEFAULT_PRECIS,
         i_quality,
@@ -476,10 +474,11 @@ fn extractFont(
                 out_memory,
             );
 
-            const png_out_name: [:0]const u8 = try std.fmt.bufPrintZ(
+            const png_out_name: [:0]const u8 = try std.fmt.bufPrintSentinel(
                 png_out_name_buf,
                 "{s}/{s}_{d:04}.png",
                 .{ png_dest_dir, name_stem, code_point },
+                0,
             );
 
             if (std.Io.Dir.cwd().createFile(io, png_out_name, .{})) |file| {

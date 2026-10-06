@@ -513,7 +513,7 @@ fn printContents(hha: *LoadedHHA) void {
                 if (tag_index < hha.tag_count) {
                     const tag: *HHATag = &hha.tags[tag_index];
                     if (tag.id == .BasicCategory) {
-                        category = @as(AssetBasicCategory, @enumFromInt(@as(u32, @intFromFloat(tag.value)))).toString();
+                        category = @as(AssetBasicCategory, @fromBackingInt(@as(u32, @intFromFloat(tag.value)))).toString();
                     }
                 }
             }
@@ -586,7 +586,7 @@ fn printContents(hha: *LoadedHHA) void {
                 std.log.info("            Type: {d}x{d} Bitmap: ({d})", .{
                     bitmap.dim[0],
                     bitmap.dim[1],
-                    @intFromEnum(hha_asset.type),
+                    @backingInt(hha_asset.type),
                 });
 
                 var first: bool = true;
@@ -618,7 +618,7 @@ fn printContents(hha: *LoadedHHA) void {
             },
             .Font => {
                 const font: *HHAFont = &hha_asset.info.font;
-                std.log.info("            Type: Font: ({d})", .{@intFromEnum(hha_asset.type)});
+                std.log.info("            Type: Font: ({d})", .{@backingInt(hha_asset.type)});
                 std.log.info("                Glyphs: {d} (one past highest codepoint: {d}", .{
                     font.glyph_count,
                     font.one_past_highest_code_point,
@@ -633,11 +633,11 @@ fn printContents(hha: *LoadedHHA) void {
                     sound.sample_count,
                     sound.channel_count,
                     @tagName(sound.chain),
-                    @intFromEnum(hha_asset.type),
+                    @backingInt(hha_asset.type),
                 });
             },
             else => {
-                std.log.info("            Type: UNKNOWN: ({d})", .{@intFromEnum(hha_asset.type)});
+                std.log.info("            Type: UNKNOWN: ({d})", .{@backingInt(hha_asset.type)});
             },
         }
     }
@@ -698,10 +698,10 @@ fn writeBMPImageTopDownRGBA(
 ) !void {
     const output_pixel_size: u32 = 4 * width * height;
 
-    const replace_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.ReplaceAlpha)) != 0;
-    const swap_red_and_blue: bool = (pixel_ops & @intFromEnum(PixelOp.SwapRedAndBlue)) != 0;
-    const multiply_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.MultiplyAlpha)) != 0;
-    const invert: bool = (pixel_ops & @intFromEnum(PixelOp.Invert)) != 0;
+    const replace_alpha: bool = (pixel_ops & @backingInt(PixelOp.ReplaceAlpha)) != 0;
+    const swap_red_and_blue: bool = (pixel_ops & @backingInt(PixelOp.SwapRedAndBlue)) != 0;
+    const multiply_alpha: bool = (pixel_ops & @backingInt(PixelOp.MultiplyAlpha)) != 0;
+    const invert: bool = (pixel_ops & @backingInt(PixelOp.Invert)) != 0;
 
     const header_size: u32 = @sizeOf(BitmapHeader) - 10;
     const header: BitmapHeader = .{

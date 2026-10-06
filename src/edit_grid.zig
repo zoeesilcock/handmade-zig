@@ -143,7 +143,7 @@ pub const EditGrid = struct {
                 if (entity.next) |next_entity| {
                     var direction: u32 = 0;
                     while (direction < BOX_SURFACE_INDEX_COUNT) : (direction += 1) {
-                        const direction_index: BoxSurfaceIndex = @enumFromInt(direction);
+                        const direction_index: BoxSurfaceIndex = @fromBackingInt(direction);
                         const mask: u32 = box.getSurfaceMaskFromSurface(direction_index);
                         if ((entity.allowed_directions_for_next & mask) != 0) {
                             const next_tile_delta: Vector3i = gen_math.getDirection(direction_index);

@@ -124,8 +124,8 @@ pub fn connectPiece(
     bitmap.parent_piece = @intCast(
         @as([*]EntityVisiblePiece, @ptrCast(parent)) - @as([*]EntityVisiblePiece, @ptrCast(&entity.pieces)),
     );
-    bitmap.parent_align_type = @intCast(@intFromEnum(parent_type));
-    bitmap.child_align_type = @intCast(@intFromEnum(child_type));
+    bitmap.parent_align_type = @intCast(@backingInt(parent_type));
+    bitmap.child_align_type = @intCast(@backingInt(child_type));
 
     std.debug.assert(@intFromPtr(parent) < @intFromPtr(child));
 }
@@ -141,8 +141,8 @@ pub fn connectPieceToWorld(
 
     const bitmap: *BitmapPiece = &child.extra.bitmap;
     bitmap.parent_piece = 0;
-    bitmap.parent_align_type = @intCast(@intFromEnum(HHAAlignPointType.None));
-    bitmap.child_align_type = @intCast(@intFromEnum(child_type));
+    bitmap.parent_align_type = @intCast(@backingInt(HHAAlignPointType.None));
+    bitmap.child_align_type = @intCast(@backingInt(child_type));
 }
 
 fn addPieceLight(
@@ -158,7 +158,7 @@ fn addPieceLight(
         .new(radius, radius, radius),
         offset,
         color.toColor(emission),
-        @intFromEnum(EntityVisiblePieceFlag.Light),
+        @backingInt(EntityVisiblePieceFlag.Light),
     );
 }
 
@@ -261,7 +261,7 @@ pub fn addConversation(region: *SimRegion) *Entity {
     const dimension: Vector3 = .new(0.5, 0.5, 0.5);
     entity.collision_volume =
         Rectangle3.fromCenterDimension(.new(0, 0, 0.5 * dimension.z()), dimension).addRadius(.splat(0.1));
-    entity.camera_behavior = @intFromEnum(entities.CameraBehavior.Offset);
+    entity.camera_behavior = @backingInt(entities.CameraBehavior.Offset);
     _ = entity.camera_offset.setZ(room_gen.getCameraOffsetZForCloseup());
     _ = entity.camera_offset.setY(2);
 
@@ -323,7 +323,7 @@ fn addFamiliar(region: *SimRegion) void {
     entity.brain_id = sim.addBrain(region);
 
     _ = addPiece(entity, .Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
-    _ = addPiece(entity, .Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
+    _ = addPiece(entity, .Head, 2.5, .zero(), .white(), @backingInt(EntityVisiblePieceFlag.BobOffset));
 }
 
 pub fn addLightProbe(region: *SimRegion, position: Vector3) void {

@@ -9,7 +9,7 @@ pub const Lane_f32 = @Vector(LANE_WIDTH, f32);
 pub const Lane_u32 = @Vector(LANE_WIDTH, u32);
 pub const Lane_bool = @Vector(LANE_WIDTH, bool);
 
-pub const Lane_Vector3 = extern struct {
+pub const Lane_Vector3 = struct {
     x: Lane_f32,
     y: Lane_f32,
     z: Lane_f32,
@@ -127,7 +127,7 @@ pub const Lane_Vector3 = extern struct {
     }
 };
 
-pub const Lane_Color3 = extern struct {
+pub const Lane_Color3 = struct {
     r: Lane_f32,
     g: Lane_f32,
     b: Lane_f32,

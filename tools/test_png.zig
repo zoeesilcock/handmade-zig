@@ -6,9 +6,7 @@ const memory = png.memory;
 const math = shared.math;
 const types = shared.types;
 const image_mod = shared.image;
-const c = @cImport({
-    @cInclude("stdlib.h");
-});
+const c = @import("c");
 
 // Types.
 const Buffer = types.Buffer;
@@ -95,11 +93,11 @@ fn writeBMPImageTopDownRGBA(
 ) !void {
     const output_pixel_size: u32 = 4 * width * height;
 
-    const replace_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.ReplaceAlpha)) != 0;
-    const swap_red_and_blue: bool = (pixel_ops & @intFromEnum(PixelOp.SwapRedAndBlue)) != 0;
-    const multiply_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.MultiplyAlpha)) != 0;
-    const invert: bool = (pixel_ops & @intFromEnum(PixelOp.Invert)) != 0;
-    const threshold_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.ThresholdAlpha)) != 0;
+    const replace_alpha: bool = (pixel_ops & @backingInt(PixelOp.ReplaceAlpha)) != 0;
+    const swap_red_and_blue: bool = (pixel_ops & @backingInt(PixelOp.SwapRedAndBlue)) != 0;
+    const multiply_alpha: bool = (pixel_ops & @backingInt(PixelOp.MultiplyAlpha)) != 0;
+    const invert: bool = (pixel_ops & @backingInt(PixelOp.Invert)) != 0;
+    const threshold_alpha: bool = (pixel_ops & @backingInt(PixelOp.ThresholdAlpha)) != 0;
 
     const header_size: u32 = @sizeOf(BitmapHeader) - 10;
     const header: BitmapHeader = .{
@@ -394,7 +392,7 @@ fn testMultiTileImport(image: ImageU32, temp_arena: *MemoryArena, error_stream: 
                     extracted.height,
                     extracted.pixels,
                     out_rgb_name,
-                    @intFromEnum(PixelOp.SwapRedAndBlue) | @intFromEnum(PixelOp.Invert), // | @intFromEnum(PixelOp.MultiplyAlpha),
+                    @backingInt(PixelOp.SwapRedAndBlue) | @backingInt(PixelOp.Invert), // | @backingInt(PixelOp.MultiplyAlpha),
                     error_stream,
                     io,
                 );
@@ -403,7 +401,7 @@ fn testMultiTileImport(image: ImageU32, temp_arena: *MemoryArena, error_stream: 
                     extracted.height,
                     extracted.pixels,
                     out_alpha_name,
-                    @intFromEnum(PixelOp.ReplaceAlpha) | @intFromEnum(PixelOp.ThresholdAlpha),
+                    @backingInt(PixelOp.ReplaceAlpha) | @backingInt(PixelOp.ThresholdAlpha),
                     error_stream,
                     io,
                 );
@@ -446,7 +444,7 @@ pub fn main(init: std.process.Init) !void {
             image.height,
             image.pixels.?,
             out_file_name_rgb,
-            @intFromEnum(PixelOp.SwapRedAndBlue) | @intFromEnum(PixelOp.Invert), // | @intFromEnum(PixelOp.MultiplyAlpha),
+            @backingInt(PixelOp.SwapRedAndBlue) | @backingInt(PixelOp.Invert), // | @backingInt(PixelOp.MultiplyAlpha),
             &error_stream,
             init.io,
         );
@@ -456,7 +454,7 @@ pub fn main(init: std.process.Init) !void {
             image.height,
             image.pixels.?,
             out_file_name_alpha,
-            @intFromEnum(PixelOp.ReplaceAlpha), // | @intFromEnum(PixelOp.ThresholdAlpha),
+            @backingInt(PixelOp.ReplaceAlpha), // | @backingInt(PixelOp.ThresholdAlpha),
             &error_stream,
             init.io,
         );

@@ -65,7 +65,7 @@ pub const DevUI = struct {
     pub fn init(self: *DevUI, assets: *Assets) void {
         var match_vector = asset.AssetVector{};
         var weight_vector = asset.AssetVector{};
-        match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
+        match_vector.e[asset.AssetTagId.FontType.toInt()] = @backingInt(file_formats.AssetFontType.Debug);
         weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
         self.font_id = assets.getBestMatchFont(.Font, &match_vector, &weight_vector);
 
@@ -89,7 +89,7 @@ pub const DevUI = struct {
         const region_dim: Vector2 = .fromV2u(commands.settings.render_dim);
 
         self.render_group =
-            RenderGroup.begin(assets, commands, @intFromEnum(RenderGroupFlags.ClearDepth), null);
+            RenderGroup.begin(assets, commands, @backingInt(RenderGroupFlags.ClearDepth), null);
         self.font = asset_rendering.pushFont(&self.render_group, self.font_id);
         self.render_group.setCameraTransform(
             1,
@@ -97,7 +97,7 @@ pub const DevUI = struct {
             .new(0, 2 / region_dim.width(), 0),
             .new(0, 0, 1),
             .zero(),
-            @intFromEnum(renderer.CameraTransformFlag.IsOrthographic),
+            @backingInt(renderer.CameraTransformFlag.IsOrthographic),
             -10000,
             10000,
             null,
@@ -281,7 +281,7 @@ pub const Interaction = struct {
     }
 };
 
-const TextOp = enum {
+const TextOp = enum(u32) {
     DrawText,
     SizeText,
 };
@@ -366,7 +366,7 @@ pub fn textOp(
                 x += advance_x;
 
                 if (code_point != ' ') {
-                    match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
+                    match_vector.e[@backingInt(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
                     if (font.getBitmapForGlyph(font_info.?, render_group.assets, code_point)) |bitmap_id| {
                         const bitmap_info = render_group.assets.getBitmapInfo(bitmap_id);
                         const bitmap_scale = char_scale * @as(f32, @floatFromInt(bitmap_info.dim[1]));

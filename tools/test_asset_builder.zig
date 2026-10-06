@@ -16,9 +16,7 @@ const MAX_FONT_HEIGHT: u32 = 1024;
 var global_font_device_context: ?win32.graphics.gdi.CreatedHDC = null;
 var opt_global_bits: ?*anyopaque = null;
 
-const c = @cImport({
-    @cInclude("stb_truetype.h");
-});
+const c = @import("c");
 const win32 = @import("win32");
 
 // Types.
@@ -236,11 +234,11 @@ fn loadFont(
         0,
         0,
         0,
-        @intFromEnum(win32.graphics.gdi.FW_NORMAL),
+        @backingInt(win32.graphics.gdi.FW_NORMAL),
         0,
         0,
         0,
-        @intFromEnum(win32.graphics.gdi.DEFAULT_CHARSET),
+        @backingInt(win32.graphics.gdi.DEFAULT_CHARSET),
         .DEFAULT_PRECIS,
         win32.graphics.gdi.CLIP_DEFAULT_PRECIS,
         .ANTIALIASED_QUALITY,
@@ -619,8 +617,8 @@ pub fn loadWAV(
 
         const header = @as(*WaveHeader, @ptrCast(@alignCast(@constCast(read_result.contents))));
 
-        std.debug.assert(header.riff_id == @intFromEnum(WaveChunkId.ChunkID_RIFF));
-        std.debug.assert(header.wave_id == @intFromEnum(WaveChunkId.ChunkID_WAVE));
+        std.debug.assert(header.riff_id == @backingInt(WaveChunkId.ChunkID_RIFF));
+        std.debug.assert(header.wave_id == @backingInt(WaveChunkId.ChunkID_WAVE));
 
         var channel_count: ?u16 = null;
         var sample_data: ?[*]i16 = null;
@@ -806,7 +804,7 @@ pub const Assets = struct {
         std.debug.assert(self.debug_asset_type == null);
 
         self.debug_asset_type = &self.asset_types[type_id.toInt()];
-        self.debug_asset_type.?.type_id = @intFromEnum(type_id);
+        self.debug_asset_type.?.type_id = @backingInt(type_id);
         self.debug_asset_type.?.first_asset_index = self.asset_count;
         self.debug_asset_type.?.one_past_last_asset_index = self.debug_asset_type.?.first_asset_index;
     }
@@ -1005,7 +1003,7 @@ fn addFont(
     // This needs to happen after the glyphs for the font have been added.
     assets.beginAssetType(.Font);
     _ = assets.addFontAsset(font);
-    assets.addTag(.FontType, @floatFromInt(@intFromEnum(font_type)));
+    assets.addTag(.FontType, @floatFromInt(@backingInt(font_type)));
     assets.endAssetType();
 
     return font;
@@ -1044,7 +1042,7 @@ fn writeFonts(allocator: std.mem.Allocator, io: std.Io) void {
     assets.beginAssetType(.Font);
     for (fonts, 0..) |font, index| {
         _ = assets.addFontAsset(font);
-        assets.addTag(.FontType, @floatFromInt(@intFromEnum(font_types[index])));
+        assets.addTag(.FontType, @floatFromInt(@backingInt(font_types[index])));
     }
     assets.endAssetType();
 

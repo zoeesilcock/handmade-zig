@@ -201,7 +201,7 @@ pub fn main(init: std.process.Init) anyerror!void {
                     }
                 },
                 else => {
-                    // try stdout.print("{d}: {s}\n", .{ @intFromEnum(token.token_type), token.text[0..token.text.count] });
+                    // try stdout.print("{d}: {s}\n", .{ @backingInt(token.token_type), token.text[0..token.text.count] });
                 },
             }
         }
@@ -213,7 +213,7 @@ pub fn main(init: std.process.Init) anyerror!void {
     var opt_meta: ?*MetaStruct = first_meta_struct;
     while (opt_meta) |meta| : (opt_meta = meta.next) {
         try stdout.print("        .{s} => {{\n", .{meta.name});
-        try stdout.print("            debug.textLine(std.fmt.bufPrintZ(&buffer, \"{{s}}\", .{{member.field_name}}) catch \"unknown\");\n", .{});
+        try stdout.print("            debug.textLine(std.fmt.bufPrintSentinel(&buffer, \"{{s}}\", .{{member.field_name}}, 0) catch \"unknown\");\n", .{});
         try stdout.print("            debug.debugDumpStruct(member_ptr, @ptrCast(&{s}Members), {s}Members.len, next_indent_level);\n", .{ meta.name, meta.name });
         try stdout.print("        }},\n", .{});
     }

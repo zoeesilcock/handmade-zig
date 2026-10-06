@@ -8,8 +8,8 @@ pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 2;
 pub const ASSET_MAX_SPRITE_DIM = 512;
 pub const ASSET_MAX_PLATE_DIM = 2048;
-pub const ASSET_TAG_COUNT = @typeInfo(AssetTagId).@"enum".fields.len;
-pub const ASSET_CATEGORY_COUNT = @typeInfo(AssetBasicCategory).@"enum".fields.len;
+pub const ASSET_TAG_COUNT = @typeInfo(AssetTagId).@"enum".field_names.len;
+pub const ASSET_CATEGORY_COUNT = @typeInfo(AssetBasicCategory).@"enum".field_names.len;
 
 // Types.
 const String = types.String;
@@ -136,7 +136,7 @@ pub const AssetTagId = enum(u32) {
     Sofa,
 
     pub fn toInt(self: AssetTagId) u32 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -281,7 +281,7 @@ comptime {
 }
 
 // Note: The decrement by 1 here is to avoid ToParent being counted. Adjust this if you add more non-sequential entries.
-pub const HHA_ALIGN_POINT_TYPE_COUNT: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len - 1;
+pub const HHA_ALIGN_POINT_TYPE_COUNT: u32 = @typeInfo(HHAAlignPointType).@"enum".field_names.len - 1;
 pub const HHAAlignPointType = enum(u16) {
     None,
 
@@ -327,15 +327,15 @@ pub const HHAAlignPoint = extern struct {
             intrinsics.roundReal32ToUInt32((size * @as(f32, @floatFromInt(std.math.maxInt(u16)))) / 85.0),
         );
         self.align_type =
-            @intFromEnum(align_point_type) | if (to_parent) @intFromEnum(HHAAlignPointType.ToParent) else 0;
+            @backingInt(align_point_type) | if (to_parent) @backingInt(HHAAlignPointType.ToParent) else 0;
     }
 
     pub fn isToParent(self: HHAAlignPoint) bool {
-        return (self.align_type & @intFromEnum(HHAAlignPointType.ToParent)) != 0;
+        return (self.align_type & @backingInt(HHAAlignPointType.ToParent)) != 0;
     }
 
     pub fn getType(self: HHAAlignPoint) HHAAlignPointType {
-        return @enumFromInt(self.align_type & ~@intFromEnum(HHAAlignPointType.ToParent));
+        return @fromBackingInt(self.align_type & ~@backingInt(HHAAlignPointType.ToParent));
     }
 
     pub fn getPositionPercent(self: HHAAlignPoint) Vector2 {
@@ -385,7 +385,7 @@ pub const HHABitmap = extern struct {
             }
         }
 
-        if (complete_type == (@intFromEnum(HHAAlignPointType.Default) | @intFromEnum(HHAAlignPointType.ToParent)) and
+        if (complete_type == (@backingInt(HHAAlignPointType.Default) | @backingInt(HHAAlignPointType.ToParent)) and
             result.align_type == 0)
         {
             result.set(.Default, true, 1.0, .new(0.5, 0.5));
@@ -602,10 +602,10 @@ pub fn alignPointNameFromType(align_type: HHAAlignPointType) String {
 
 pub fn alignPointTypeFromName(name: String) HHAAlignPointType {
     var result: HHAAlignPointType = .None;
-    var type_index: u32 = 0;
-    const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len - 1;
+    var type_index: u16 = 0;
+    const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".field_names.len - 1;
     while (type_index < type_count) : (type_index += 1) {
-        const align_type: HHAAlignPointType = @enumFromInt(type_index);
+        const align_type: HHAAlignPointType = @fromBackingInt(type_index);
         if (shared.stringBuffersEqualLowercase(name, alignPointNameFromType(align_type))) {
             result = align_type;
             break;

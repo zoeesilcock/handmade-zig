@@ -6,9 +6,7 @@ const shared = @import("shared.zig");
 const renderer = @import("renderer.zig");
 const opengl = @import("renderer_opengl.zig");
 
-const gl = @cImport({
-    @cInclude("GL/glcorearb.h");
-});
+const gl = @import("gl_c");
 
 // Types.
 const OpenGL = opengl.OpenGL;
@@ -589,12 +587,12 @@ fn outputLastError(title: []const u8) void {
     const last_error = win32.GetLastError();
 
     if (INTERNAL) {
-        std.debug.print("{s}: {d}\n", .{ title, @intFromEnum(last_error) });
+        std.debug.print("{s}: {d}\n", .{ title, @backingInt(last_error) });
     } else {
         var buffer: [128]u8 = undefined;
         const length = shared.formatString(buffer.len, &buffer, "%s: %d\n", .{
             title,
-            @intFromEnum(last_error),
+            @backingInt(last_error),
         });
         win32.OutputDebugStringA(@ptrCast(buffer[0..length]));
     }

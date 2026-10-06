@@ -19,7 +19,7 @@ pub fn dumpKnownStruct(member_ptr: *anyopaque, member: *const MemberDefinition, 
     var buffer: [128]u8 = undefined;
     switch (member.field_type) {
         .SimRegion => {
-            debug.textLine(std.fmt.bufPrintZ(&buffer, "{s}", .{member.field_name}) catch "unknown");
+            debug.textLine(std.fmt.bufPrintSentinel(&buffer, "{s}", .{member.field_name}, 0) catch "unknown");
             debug.debugDumpStruct(member_ptr, @ptrCast(&SimRegionMembers), SimRegionMembers.len, next_indent_level);
         },
         else => {},
