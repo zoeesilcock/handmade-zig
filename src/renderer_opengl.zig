@@ -385,6 +385,8 @@ pub const OpenGL = extern struct {
     max_special_texture_count: u32,
     special_texture_handles: [*]u32 = undefined,
 
+    single_pixel_all_zeroes_texture: u32 = 0,
+
     // Dynamic resources that get recreated when settings change.
     resolve_frame_buffer: Framebuffer = .{},
     depth_peel_buffer: Framebuffer = .{},
@@ -581,6 +583,11 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             GL_STATIC_DRAW,
         );
     }
+
+    const all_zeroes: u32 = 0;
+    gl.glGenTextures(1, &open_gl.single_pixel_all_zeroes_texture);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.single_pixel_all_zeroes_texture);
+    gl.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, 1, 1, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, &all_zeroes);
 
     gl.glGenTextures(1, &open_gl.texture_array);
     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
@@ -840,7 +847,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\{
         \\#if DepthPeel
         \\  float ClipDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
-        \\  if (gl_FragCoord.z < ClipDepth + 0.000001) // This epsilon was needed on an AMD GPU.
+        \\  if (gl_FragCoord.z <= ClipDepth + 0.000001) // This epsilon was needed on an AMD GPU.
         \\  {
         \\    discard;
         \\  }
@@ -1039,7 +1046,7 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         \\  gl_Position = VertP;
         \\}
     ;
-    var fragment_code: [4096]u8 = undefined;
+    var fragment_code: [8192]u8 = undefined;
     const fragment_code_length = shared.formatString(
         fragment_code.len,
         &fragment_code,
@@ -1050,6 +1057,7 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         \\
         \\uniform sampler2DMS DepthSampler;
         \\uniform sampler2DMS ColorSampler;
+        \\uniform sampler2D MaskSampler;
         \\
         \\out vec4 BlendUnitColor;
         \\
@@ -1058,7 +1066,8 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         \\#if !MultisampleDebug
         \\  // TODO: Can we replace this with a check for if a particular location in a multisample texture has all one
         \\  // sample or actually contains multiple samples?
-        \\  if (true)
+        \\  float Mask = texelFetch(MaskSampler, ivec2(gl_FragCoord.xy), 0).a;
+        \\  if (Mask < 1.0)
         \\  {
         \\    float DepthMax = 0.0f;
         \\    float DepthMin = 1.0f;
@@ -1088,8 +1097,12 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         \\  }
         \\  else
         \\  {
+        \\#if 0
         \\    gl_FragDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
         \\    BlendUnitColor = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), 0);
+        \\#endif
+        \\    BlendUnitColor = vec4(0, 0, 0, 1);
+        \\    gl_FragDepth = 1.0;
         \\  }
         \\
         \\#else
@@ -1116,19 +1129,28 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         \\    }
         \\  }
         \\  BlendUnitColor.a = 1;
-        \\  if (UniqueCount == 1) {
+        \\  if (UniqueCount == 1)
+        \\  {
         \\    BlendUnitColor.rgb = vec3(0.0, 0.0, 0.0);
         \\  }
-        \\  if (UniqueCount == 2) {
+        \\  if (UniqueCount == 2)
+        \\  {
         \\    BlendUnitColor.rgb = vec3(0.0, 1.0, 0.0);
         \\  }
-        \\  if (UniqueCount == 3) {
+        \\  if (UniqueCount == 3)
+        \\  {
         \\    BlendUnitColor.rgb = vec3(1.0, 1.0, 0.0);
         \\  }
-        \\  if (UniqueCount >= 4) {
+        \\  if (UniqueCount >= 4)
+        \\  {
         \\    BlendUnitColor.rgb = vec3(1.0, 0.0, 0.0);
         \\  }
         \\#endif
+        \\
+        \\  if (BlendUnitColor.a == 1.0)
+        \\  {
+        \\    gl_FragDepth = 1.0;
+        \\  }
         \\}
     ,
         .{
@@ -1144,7 +1166,7 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
         @ptrCast(fragment_code[0..fragment_code_length]),
         &program.common,
     );
-    linkSamplers(&program.common, &.{ "DepthSampler", "ColorSampler", "EmissionSampler", "NormalPositionSampler" });
+    linkSamplers(&program.common, &.{ "DepthSampler", "ColorSampler", "MaskSampler" });
 }
 
 fn compileFinalStretchProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
@@ -1720,7 +1742,14 @@ fn endScreenFill() void {
     gl.glDepthFunc(GL.GL_LEQUAL);
 }
 
-fn resolveMultisample(open_gl: *OpenGL, from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
+fn resolveMultisample(
+    open_gl: *OpenGL,
+    from: *Framebuffer,
+    to: *Framebuffer,
+    width: i32,
+    height: i32,
+    mask_texture: u32,
+) void {
     beginScreenFill(open_gl, to.framebuffer_handle, width, height);
 
     useResolveMultisampleProgramBegin(open_gl, &open_gl.resolve_multisample);
@@ -1733,6 +1762,8 @@ fn resolveMultisample(open_gl: *OpenGL, from: *Framebuffer, to: *Framebuffer, wi
         platform.optGLActiveTexture.?(GL_TEXTURE1 + color_index);
         gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, from.color_handle[color_index]);
     }
+    platform.optGLActiveTexture.?(GL_TEXTURE2);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, mask_texture);
 
     platform.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
 
@@ -1976,9 +2007,16 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 if (open_gl.multisampling) {
                     const from: *Framebuffer = &open_gl.depth_peel_buffer;
                     const to: *Framebuffer = &open_gl.depth_peel_resolve_buffers[on_peel_index];
+                    var mask: u32 = 0;
+
+                    if (on_peel_index == 0) {
+                        mask = open_gl.single_pixel_all_zeroes_texture;
+                    } else {
+                        mask = open_gl.depth_peel_resolve_buffers[on_peel_index - 1].color_handle[0];
+                    }
 
                     if (true) {
-                        resolveMultisample(open_gl, from, to, render_width, render_height);
+                        resolveMultisample(open_gl, from, to, render_width, render_height, mask);
                     } else {
                         platform.optGLBindFramebufferEXT.?(GL_READ_FRAMEBUFFER, from.framebuffer_handle);
                         platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, to.framebuffer_handle);
@@ -2033,7 +2071,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 gl.glScissor(clip_min_x, clip_min_y, clip_max_x - clip_min_x, clip_max_y - clip_min_y);
 
                 var program: *ZBiasProgram = &open_gl.z_bias_no_depth_peel;
-                var alpha_threshold: f32 = 0.01;
+                var alpha_threshold: f32 = 0.0;
                 if (peeling) {
                     const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, on_peel_index - 1);
 
