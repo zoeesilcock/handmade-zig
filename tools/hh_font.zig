@@ -93,7 +93,7 @@ fn loadGlyphBMP(
     const cheese_point: []const u16 = &[_]u16{@intCast(code_point)};
 
     var size: win32.foundation.SIZE = undefined;
-    _ = win32.graphics.gdi.GetTextExtentPoint32W(device_context, @ptrCast(cheese_point), 1, &size);
+    _ = win32.gdi32.GetTextExtentPoint32W(device_context, @ptrCast(cheese_point), 1, &size);
 
     const pre_step_x: u32 = 128;
 
@@ -106,7 +106,7 @@ fn loadGlyphBMP(
         bound_height = max_glyph_dim.y();
     }
 
-    _ = win32.graphics.gdi.TextOutW(device_context, pre_step_x, 0, @ptrCast(cheese_point), 1);
+    _ = win32.gdi32.TextOutW(device_context, pre_step_x, 0, @ptrCast(cheese_point), 1);
 
     if (scale > 1) {
         bound_height /= scale;
@@ -238,11 +238,11 @@ fn loadGlyphBMP(
 
     if (false) {
         var this_abc: win32.foundation.ABC = undefined;
-        _ = win32.graphics.gdi.GetCharABCWidthsW(device_context, code_point, code_point, &this_abc);
+        _ = win32.gdi32.GetCharABCWidthsW(device_context, code_point, code_point, &this_abc);
         char_advance = @floatFromInt(this_abc.abcA + @as(i32, @intCast(this_abc.abcB)) + this_abc.abcC);
     } else {
         var this_width: i32 = undefined;
-        _ = win32.graphics.gdi.GetCharWidth32W(device_context, code_point, code_point, &this_width);
+        _ = win32.gdi32.GetCharWidth32W(device_context, code_point, code_point, &this_width);
         char_advance = @floatFromInt(this_width);
     }
 
@@ -338,10 +338,10 @@ fn extractFont(
     }
 
     const device_context: win32.graphics.gdi.CreatedHDC =
-        win32.graphics.gdi.CreateCompatibleDC(win32.graphics.gdi.GetDC(null));
+        win32.gdi32.CreateCompatibleDC(win32.gdi32.GdiGetDC(null));
 
-    _ = win32.graphics.gdi.AddFontResourceExA(@ptrCast(ttf_file_name), .PRIVATE, null);
-    if (win32.graphics.gdi.CreateFontA(
+    _ = win32.gdi32.AddFontResourceExA(@ptrCast(ttf_file_name), .PRIVATE, null);
+    if (win32.gdi32.CreateFontA(
         -@as(i32, @intCast(sample_pixel_height)),
         0,
         0,
@@ -351,16 +351,16 @@ fn extractFont(
         0,
         0,
         @backingInt(win32.graphics.gdi.DEFAULT_CHARSET),
-        .DEFAULT_PRECIS,
-        win32.graphics.gdi.CLIP_DEFAULT_PRECIS,
-        i_quality,
-        win32.graphics.gdi.FF_DONTCARE,
+        0,
+        @backingInt(win32.graphics.gdi.CLIP_DEFAULT_PRECIS),
+        @backingInt(i_quality),
+        @backingInt(win32.graphics.gdi.FF_DONTCARE),
         @ptrCast(font_name),
     )) |win32_handle| {
-        _ = win32.graphics.gdi.SelectObject(device_context, win32_handle);
+        _ = win32.gdi32.SelectObject(device_context, win32_handle);
 
         var text_metrics: win32.graphics.gdi.TEXTMETRICW = undefined;
-        _ = win32.graphics.gdi.GetTextMetricsW(device_context, &text_metrics);
+        _ = win32.gdi32.GetTextMetricsW(device_context, &text_metrics);
 
         // These are arbitrarily padded because we're not sure what kind of shenanigans Microsoft may pull when they
         // report sizes.
@@ -403,7 +403,7 @@ fn extractFont(
             },
         };
 
-        const bitmap = win32.graphics.gdi.CreateDIBSection(
+        const bitmap = win32.gdi32.CreateDIBSection(
             device_context,
             &info,
             win32.graphics.gdi.DIB_RGB_COLORS,
@@ -411,9 +411,9 @@ fn extractFont(
             null,
             0,
         );
-        _ = win32.graphics.gdi.SelectObject(device_context, bitmap);
-        _ = win32.graphics.gdi.SetBkColor(device_context, 0x000000);
-        _ = win32.graphics.gdi.SetTextColor(device_context, 0xffffff);
+        _ = win32.gdi32.SelectObject(device_context, bitmap);
+        _ = win32.gdi32.SetBkColor(device_context, .fromInt(0x000000));
+        _ = win32.gdi32.SetTextColor(device_context, .fromInt(0xffffff));
 
         // const min_code_point: u32 = std.math.maxInt(u32);
         // const max_code_point: u32 = 0;
@@ -436,9 +436,9 @@ fn extractFont(
         const descender_height: f32 = @floatFromInt(text_metrics.tmDescent);
         const external_leading: f32 = @floatFromInt(text_metrics.tmExternalLeading);
 
-        const kerning_pair_count = win32.graphics.gdi.GetKerningPairsW(device_context, 0, null);
+        const kerning_pair_count = win32.gdi32.GetKerningPairsW(device_context, 0, null);
         const kerning_pairs = allocator.alloc(win32.graphics.gdi.KERNINGPAIR, kerning_pair_count) catch unreachable;
-        _ = win32.graphics.gdi.GetKerningPairsW(device_context, kerning_pair_count, kerning_pairs.ptr);
+        _ = win32.gdi32.GetKerningPairsW(device_context, kerning_pair_count, kerning_pairs.ptr);
 
         var kerning_pair_index: u32 = 0;
         while (kerning_pair_index < kerning_pair_count) : (kerning_pair_index += 1) {

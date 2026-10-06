@@ -599,7 +599,7 @@ fn windowProcedure(
 pub export fn wWinMain(
     instance: win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
-    cmd_line: ?win32.PWSTR,
+    cmd_line: ?[*:0]u16,
     cmd_show: c_int,
 ) callconv(.winapi) c_int {
     return WinMain(instance, prev_instance, cmd_line, cmd_show);
@@ -608,7 +608,7 @@ pub export fn wWinMain(
 pub export fn WinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
-    cmd_line: ?win32.PWSTR,
+    cmd_line: ?[*:0]u16,
     cmd_show: c_int,
 ) c_int {
     _ = prev_instance;

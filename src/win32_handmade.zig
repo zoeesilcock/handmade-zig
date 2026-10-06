@@ -175,6 +175,10 @@ const Win32PlatformFileGroup = extern struct {
     arena: MemoryArena,
 };
 
+fn succeeded(hr: win32.zig.HRESULT) bool {
+    return @backingInt(hr) >= 0;
+}
+
 fn utf8FromUTF16(arena: *MemoryArena, name_size: usize, name: [*:0]const u16) [*:0]u8 {
     const result_storage: usize = 4 * name_size + 1;
     var result: [*:0]u8 = @ptrCast(arena.pushSize(result_storage + 1, null, @src()));
@@ -444,7 +448,7 @@ fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, s
         var bytes_written: u32 = undefined;
         const write_result = win32.WriteFile(
             win32_handle,
-            source,
+            @ptrCast(source),
             file_size32,
             &bytes_written,
             &overlapped,
@@ -496,7 +500,7 @@ fn atomicReplaceFileContents(file_info: *shared.PlatformFileInfo, size: u64, sou
         if (file != win32.INVALID_HANDLE_VALUE) {
             var bytes_written: u32 = undefined;
             var write_ok: bool = false;
-            if (win32.WriteFile(file, source, @intCast(size), &bytes_written, null) != 0) {
+            if (win32.WriteFile(file, @ptrCast(source), @intCast(size), &bytes_written, null) != 0) {
                 write_ok = bytes_written == size;
             }
             _ = win32.CloseHandle(file);
@@ -1277,7 +1281,7 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
 
             // Create the DirectSound object.
             var opt_direct_sound: ?*win32.IDirectSound = undefined;
-            if (win32.SUCCEEDED(DirectSoundCreate(null, &opt_direct_sound, null))) {
+            if (succeeded(DirectSoundCreate(null, &opt_direct_sound, null))) {
                 if (opt_direct_sound) |direct_sound| {
                     var wave_format = win32.WAVEFORMATEX{
                         .wFormatTag = win32.WAVE_FORMAT_PCM,
@@ -1292,7 +1296,7 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
                     wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
                     wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
 
-                    if (win32.SUCCEEDED(direct_sound.vtable.SetCooperativeLevel(direct_sound, window, win32.DSSCL_PRIORITY))) {
+                    if (succeeded(direct_sound.vtable.SetCooperativeLevel(direct_sound, window, win32.DSSCL_PRIORITY))) {
                         // Create the primary buffer.
                         var buffer_description = win32.DSBUFFERDESC{
                             .dwSize = @sizeOf(win32.DSBUFFERDESC),
@@ -1304,9 +1308,9 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
                         };
                         var opt_primary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 
-                        if (win32.SUCCEEDED(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_primary_buffer, null))) {
+                        if (succeeded(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_primary_buffer, null))) {
                             if (opt_primary_buffer) |primary_buffer| {
-                                if (win32.SUCCEEDED(primary_buffer.vtable.SetFormat(primary_buffer, &wave_format))) {
+                                if (succeeded(primary_buffer.vtable.SetFormat(primary_buffer, &wave_format))) {
                                     win32.OutputDebugStringA("Primary buffer created!\n");
                                 }
                             }
@@ -1327,7 +1331,7 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
                         buffer_description.dwFlags |= win32.DSBCAPS_GLOBALFOCUS;
                     }
 
-                    if (win32.SUCCEEDED(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_secondary_buffer, null))) {
+                    if (succeeded(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_secondary_buffer, null))) {
                         if (opt_secondary_buffer != null) {
                             win32.OutputDebugStringA("Secondary buffer created!\n");
                         }
@@ -1344,7 +1348,7 @@ fn clearSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirect
     var region2: ?*anyopaque = undefined;
     var region2_size: std.os.windows.DWORD = 0;
 
-    if (win32.SUCCEEDED(secondary_buffer.vtable.Lock(
+    if (succeeded(secondary_buffer.vtable.Lock(
         secondary_buffer,
         0,
         sound_output.secondary_buffer_size,
@@ -1384,7 +1388,7 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
     var region2: ?*anyopaque = undefined;
     var region2_size: std.os.windows.DWORD = 0;
 
-    if (win32.SUCCEEDED(secondary_buffer.vtable.Lock(
+    if (succeeded(secondary_buffer.vtable.Lock(
         secondary_buffer,
         info.byte_to_lock,
         info.bytes_to_write,
@@ -1528,7 +1532,12 @@ fn windowProcedure(
         win32.WM_ACTIVATEAPP => {
             if (INTERNAL) {
                 const active = (w_param != 0);
-                _ = win32.SetLayeredWindowAttributes(window, 0, if (active) DEBUG_WINDOW_ACTIVE_OPACITY else DEBUG_WINDOW_INACTIVE_OPACITY, win32.LWA_ALPHA);
+                _ = win32.SetLayeredWindowAttributes(
+                    window,
+                    .black,
+                    if (active) DEBUG_WINDOW_ACTIVE_OPACITY else DEBUG_WINDOW_INACTIVE_OPACITY,
+                    win32.LWA_ALPHA,
+                );
             }
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
             result = 1;
@@ -1684,7 +1693,7 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
                 };
                 _ = win32.WriteFile(
                     state.recording_handle,
-                    &dest_block,
+                    @ptrCast(&dest_block),
                     @sizeOf(SavedMemoryBlock),
                     &bytes_written,
                     null,
@@ -1706,7 +1715,7 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
         var dest_block: SavedMemoryBlock = .{};
         _ = win32.WriteFile(
             state.recording_handle,
-            &dest_block,
+            @ptrCast(&dest_block),
             @sizeOf(SavedMemoryBlock),
             &bytes_written,
             null,
@@ -1716,7 +1725,7 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
 
 fn recordInput(state: *Win32State, new_input: *shared.GameInput) void {
     var bytes_written: u32 = undefined;
-    _ = win32.WriteFile(state.recording_handle, new_input, @sizeOf(@TypeOf(new_input.*)), &bytes_written, null);
+    _ = win32.WriteFile(state.recording_handle, @ptrCast(new_input), @sizeOf(@TypeOf(new_input.*)), &bytes_written, null);
 }
 
 fn endRecordingInput(state: *Win32State) void {
@@ -1982,7 +1991,7 @@ fn fullRestart(source_exe: [*:0]const u8, dest_exe: [*:0]const u8, delete_exe: [
 pub export fn wWinMain(
     instance: win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
-    cmd_line: ?win32.PWSTR,
+    cmd_line: ?[*:0]u16,
     cmd_show: c_int,
 ) callconv(.winapi) c_int {
     return WinMain(instance, prev_instance, cmd_line, cmd_show);
@@ -1993,7 +2002,7 @@ pub export fn wWinMain(
 pub export fn WinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
-    cmd_line: ?win32.PWSTR,
+    cmd_line: ?[*:0]u16,
     cmd_show: c_int,
 ) c_int {
     _ = prev_instance;
@@ -2124,7 +2133,12 @@ pub export fn WinMain(
             makeQueue(&low_priority_queue, low_priority_startups.len, @ptrCast(&low_priority_startups));
 
             if (INTERNAL) {
-                _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
+                _ = win32.SetLayeredWindowAttributes(
+                    window_handle,
+                    .black,
+                    DEBUG_WINDOW_ACTIVE_OPACITY,
+                    win32.LWA_ALPHA,
+                );
             }
 
             var monitor_refresh_hz: i32 = 60;
@@ -2336,7 +2350,7 @@ pub export fn WinMain(
                             const audio_wall_clock = getWallClock();
                             const from_begin_to_audio_seconds = getSecondsElapsed(flip_wall_clock, audio_wall_clock);
 
-                            if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
+                            if (succeeded(secondary_buffer.vtable.GetCurrentPosition(
                                 secondary_buffer,
                                 &play_cursor,
                                 &write_cursor,

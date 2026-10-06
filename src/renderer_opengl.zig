@@ -267,7 +267,8 @@ fn glDebugProc(
 }
 
 // TODO: How do we import OpenGL on other platforms here?
-pub const gl = @import("win32").graphics.open_gl;
+pub const GL = @import("win32").graphics.open_gl;
+pub const gl = @import("win32").everything.opengl32;
 const platform = @import("win32_opengl.zig");
 
 const OpenGLProgramCommon = extern struct {
@@ -417,9 +418,9 @@ pub const Info = struct {
     pub fn get(is_modern_context: bool) Info {
         var result: Info = .{
             .is_modern_context = is_modern_context,
-            .vendor = gl.glGetString(gl.GL_VENDOR),
-            .renderer = gl.glGetString(gl.GL_RENDERER),
-            .version = gl.glGetString(gl.GL_VERSION),
+            .vendor = gl.glGetString(GL.GL_VENDOR),
+            .renderer = gl.glGetString(GL.GL_RENDERER),
+            .version = gl.glGetString(GL.GL_VERSION),
         };
 
         if (is_modern_context) {
@@ -433,7 +434,7 @@ pub const Info = struct {
 
         var extension_index: u32 = 0;
         while (extension_index < extension_count) : (extension_index += 1) {
-            if (platform.optGLGetStringi.?(gl.GL_EXTENSIONS, extension_index)) |extension_name| {
+            if (platform.optGLGetStringi.?(GL.GL_EXTENSIONS, extension_index)) |extension_name| {
                 if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_EXT_texture_sRGB")) {
                     result.gl_ext_texture_srgb = true;
                 } else if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_EXT_framebuffer_sRGB")) {
@@ -512,8 +513,8 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         open_gl.max_multi_sample_count = 16;
     }
 
-    open_gl.default_sprite_texture_format = gl.GL_RGBA8;
-    open_gl.default_framebuffer_texture_format = gl.GL_RGBA16;
+    open_gl.default_sprite_texture_format = GL.GL_RGBA8;
+    open_gl.default_framebuffer_texture_format = GL.GL_RGBA16;
 
     if (ALLOW_GPU_SRGB) {
         if (info.gl_ext_texture_srgb) {
@@ -537,7 +538,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             //     false,
             // );
             //
-            // if (gl.glGetError() == gl.GL_NO_ERROR) {
+            // if (gl.glGetError() == GL.GL_NO_ERROR) {
             {
                 open_gl.default_framebuffer_texture_format = GL_SRGB8_ALPHA8;
                 gl.glEnable(GL_FRAMEBUFFER_SRGB);
@@ -594,16 +595,16 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             mip.image.height,
             open_gl.max_texture_count,
             0,
-            gl.GL_BGRA_EXT,
-            gl.GL_UNSIGNED_BYTE,
+            GL.GL_BGRA_EXT,
+            GL.GL_UNSIGNED_BYTE,
             null,
         );
     }
 
-    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_NEAREST);
-    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
-    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR_MIPMAP_NEAREST);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     gl.glGenTextures(@intCast(open_gl.max_special_texture_count), @ptrCast(open_gl.special_texture_handles));
 
@@ -612,13 +613,13 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         const handle: u32 = open_gl.special_texture_handles[handle_index];
         gl.glBindTexture(GL_TEXTURE_2D_ARRAY, handle);
 
-        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
-        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
-        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
 }
 
 const shader_header_code =
@@ -1240,7 +1241,7 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         platform.optGLVertexAttribPointer.?(
             @intCast(position_array_index),
             4,
-            gl.GL_FLOAT,
+            GL.GL_FLOAT,
             false,
             @sizeOf(TexturedVertex),
             @ptrFromInt(@offsetOf(TexturedVertex, "position")),
@@ -1251,7 +1252,7 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         platform.optGLVertexAttribPointer.?(
             @intCast(normal_array_index),
             3,
-            gl.GL_FLOAT,
+            GL.GL_FLOAT,
             false,
             @sizeOf(TexturedVertex),
             @ptrFromInt(@offsetOf(TexturedVertex, "normal")),
@@ -1262,7 +1263,7 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         platform.optGLVertexAttribPointer.?(
             @intCast(color_array_index),
             4,
-            gl.GL_UNSIGNED_BYTE,
+            GL.GL_UNSIGNED_BYTE,
             true,
             @sizeOf(TexturedVertex),
             @ptrFromInt(@offsetOf(TexturedVertex, "color")),
@@ -1273,7 +1274,7 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         platform.optGLVertexAttribPointer.?(
             @intCast(uv_array_index),
             2,
-            gl.GL_FLOAT,
+            GL.GL_FLOAT,
             false,
             @sizeOf(TexturedVertex),
             @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
@@ -1284,7 +1285,7 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         platform.optGLVertexAttribIPointer.?(
             @intCast(texture_index_index),
             1,
-            gl.GL_UNSIGNED_SHORT,
+            GL.GL_UNSIGNED_SHORT,
             @sizeOf(TexturedVertex),
             @ptrFromInt(@offsetOf(TexturedVertex, "texture_index")),
         );
@@ -1344,22 +1345,22 @@ fn framebufferTexImage(open_gl: *OpenGL, slot: u32, format: i32, filter_type: i3
             width,
             height,
             0,
-            if (format == DEPTH_COMPONENT_TYPE) gl.GL_DEPTH_COMPONENT else gl.GL_BGRA_EXT,
-            gl.GL_UNSIGNED_BYTE,
+            if (format == DEPTH_COMPONENT_TYPE) GL.GL_DEPTH_COMPONENT else GL.GL_BGRA_EXT,
+            GL.GL_UNSIGNED_BYTE,
             null,
         );
     }
 
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, filter_type);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, filter_type);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, filter_type);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, filter_type);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     return result;
 }
 
 fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, color_buffer_count: u32) Framebuffer {
-    std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+    std.debug.assert(gl.glGetError() == GL.GL_NO_ERROR);
     std.debug.assert(width > 0 and height > 0);
 
     var result: Framebuffer = .{};
@@ -1371,8 +1372,8 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&result.framebuffer_handle));
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, result.framebuffer_handle);
 
-    const slot = if (multisampled) GL_TEXTURE_2D_MULTISAMPLE else gl.GL_TEXTURE_2D;
-    const filter_type: i32 = if (filtered) gl.GL_LINEAR else gl.GL_NEAREST;
+    const slot = if (multisampled) GL_TEXTURE_2D_MULTISAMPLE else GL.GL_TEXTURE_2D;
+    const filter_type: i32 = if (filtered) GL.GL_LINEAR else GL.GL_NEAREST;
     const sample_count: i32 = if (multisampled) open_gl.max_multi_sample_count else 1;
 
     std.debug.assert(color_buffer_count <= ALL_COLOR_ATTACHMENTS.len);
@@ -1386,7 +1387,7 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
         result.color_handle[color_index] = framebufferTexImage(
             open_gl,
             slot,
-            if (color_index == 0) open_gl.default_framebuffer_texture_format else gl.GL_RGBA8,
+            if (color_index == 0) open_gl.default_framebuffer_texture_format else GL.GL_RGBA8,
             filter_type,
             width,
             height,
@@ -1400,7 +1401,7 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
         );
     }
     platform.optGLDrawBuffers.?(color_buffer_count, @ptrCast(&ALL_COLOR_ATTACHMENTS));
-    std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+    std.debug.assert(gl.glGetError() == GL.GL_NO_ERROR);
 
     if (has_depth) {
         result.gpu_memory_used +=
@@ -1415,7 +1416,7 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
             0,
         );
     }
-    std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+    std.debug.assert(gl.glGetError() == GL.GL_NO_ERROR);
 
     const frame_buffer_status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
     std.debug.assert(frame_buffer_status == GL_FRAME_BUFFER_COMPLETE);
@@ -1565,14 +1566,14 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     // while (texture_width > 1 and texture_height > 1) : (light_index += 1) {
     //     const light_buffer: *LightBuffer = &open_gl.light_buffers[open_gl.light_buffer_count];
     //     open_gl.light_buffer_count += 1;
-    //     const filter_type: i32 = gl.GL_LINEAR;
+    //     const filter_type: i32 = GL.GL_LINEAR;
     //
     //     light_buffer.width = texture_width;
     //     light_buffer.height = texture_height;
     //
     //     light_buffer.front_emission_texture = framebufferTexImage(
     //         open_gl,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         GL_RGB32F,
     //         filter_type,
     //         texture_width,
@@ -1580,7 +1581,7 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //     );
     //     light_buffer.back_emission_texture = framebufferTexImage(
     //         open_gl,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         GL_RGB32F,
     //         filter_type,
     //         texture_width,
@@ -1588,7 +1589,7 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //     );
     //     light_buffer.surface_color_texture = framebufferTexImage(
     //         open_gl,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         GL_RGB32F,
     //         filter_type,
     //         texture_width,
@@ -1596,7 +1597,7 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //     );
     //     light_buffer.normal_position_texture = framebufferTexImage(
     //         open_gl,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         GL_RGB32F,
     //         filter_type,
     //         texture_width,
@@ -1609,28 +1610,28 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //     platform.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT0,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         light_buffer.front_emission_texture,
     //         0,
     //     );
     //     platform.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT1,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         light_buffer.back_emission_texture,
     //         0,
     //     );
     //     platform.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT2,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         light_buffer.surface_color_texture,
     //         0,
     //     );
     //     platform.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT3,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         light_buffer.normal_position_texture,
     //         0,
     //     );
@@ -1642,14 +1643,14 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //     platform.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT0,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         light_buffer.front_emission_texture,
     //         0,
     //     );
     //     platform.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT1,
-    //         gl.GL_TEXTURE_2D,
+    //         GL.GL_TEXTURE_2D,
     //         light_buffer.back_emission_texture,
     //         0,
     //     );
@@ -1667,39 +1668,39 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     // }
 
     gl.glGenTextures(1, &open_gl.light_data0);
-    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data0);
-    gl.glTexImage1D(gl.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, gl.GL_RGBA, gl.GL_FLOAT, null);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data0);
+    gl.glTexImage1D(GL.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, GL.GL_RGBA, GL.GL_FLOAT, null);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     gl.glGenTextures(1, &open_gl.light_data1);
-    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data1);
-    gl.glTexImage1D(gl.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, gl.GL_RGBA, gl.GL_FLOAT, null);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data1);
+    gl.glTexImage1D(GL.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, GL.GL_RGBA, GL.GL_FLOAT, null);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
-    var min_filter: i32 = gl.GL_LINEAR_MIPMAP_NEAREST;
-    var mag_filter: i32 = gl.GL_LINEAR;
+    var min_filter: i32 = GL.GL_LINEAR_MIPMAP_NEAREST;
+    var mag_filter: i32 = GL.GL_LINEAR;
     if (settings.nearest_texel_filtering) {
-        mag_filter = gl.GL_NEAREST;
+        mag_filter = GL.GL_NEAREST;
         if (settings.no_mip_maps) {
-            min_filter = gl.GL_NEAREST;
+            min_filter = GL.GL_NEAREST;
         } else {
-            min_filter = gl.GL_NEAREST_MIPMAP_NEAREST;
+            min_filter = GL.GL_NEAREST_MIPMAP_NEAREST;
         }
     } else if (settings.no_mip_maps) {
-        min_filter = gl.GL_LINEAR;
+        min_filter = GL.GL_LINEAR;
     }
-    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, min_filter);
-    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, mag_filter);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MIN_FILTER, min_filter);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MAG_FILTER, mag_filter);
 
-    gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+    gl.glBindTexture(GL.GL_TEXTURE_1D, 0);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
     gl.glBindTexture(GL_TEXTURE_3D, 0);
 
     wgl.setVSync(open_gl, open_gl.current_settings.request_vsync);
@@ -1709,14 +1710,14 @@ fn beginScreenFill(open_gl: *OpenGL, framebuffer_handle: u32, width: i32, height
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, framebuffer_handle);
     gl.glViewport(0, 0, width, height);
     gl.glScissor(0, 0, width, height);
-    gl.glDepthFunc(gl.GL_ALWAYS);
+    gl.glDepthFunc(GL.GL_ALWAYS);
 
     platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
 }
 
 fn endScreenFill() void {
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
-    gl.glDepthFunc(gl.GL_LEQUAL);
+    gl.glDepthFunc(GL.GL_LEQUAL);
 }
 
 fn resolveMultisample(open_gl: *OpenGL, from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
@@ -1733,7 +1734,7 @@ fn resolveMultisample(open_gl: *OpenGL, from: *Framebuffer, to: *Framebuffer, wi
         gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, from.color_handle[color_index]);
     }
 
-    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
+    platform.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
 
     platform.optGLActiveTexture.?(GL_TEXTURE0);
 
@@ -1761,14 +1762,14 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
                 const handle: u32 = getSpecialTextureHandleFor(open_gl, texture);
                 gl.glBindTexture(GL_TEXTURE_2D_ARRAY, handle);
                 // gl.glTexImage2D(
-                //     gl.GL_TEXTURE_2D,
+                //     GL.GL_TEXTURE_2D,
                 //     0,
                 //     open_gl.default_sprite_texture_format,
                 //     texture.width,
                 //     texture.height,
                 //     0,
-                //     gl.GL_BGRA_EXT,
-                //     gl.GL_UNSIGNED_BYTE,
+                //     GL.GL_BGRA_EXT,
+                //     GL.GL_UNSIGNED_BYTE,
                 //     data,
                 // );
                 platform.optGLTexImage3D.?(
@@ -1779,8 +1780,8 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
                     texture.values.height,
                     1,
                     0,
-                    gl.GL_BGRA_EXT,
-                    gl.GL_UNSIGNED_BYTE,
+                    GL.GL_BGRA_EXT,
+                    GL.GL_UNSIGNED_BYTE,
                     data,
                 );
             } else {
@@ -1799,14 +1800,14 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
                         mip.image.width,
                         mip.image.height,
                         1,
-                        gl.GL_BGRA_EXT,
-                        gl.GL_UNSIGNED_BYTE,
+                        GL.GL_BGRA_EXT,
+                        GL.GL_UNSIGNED_BYTE,
                         @ptrCast(mip.image.pixels),
                     );
                 }
             }
 
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+            gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
         } else {
             std.debug.assert(op.state == .Empty);
         }
@@ -1865,20 +1866,20 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     const window_width: i32 = @intCast(commands.os_window_dim.width());
     const window_height: i32 = @intCast(commands.os_window_dim.height());
 
-    gl.glDepthMask(gl.GL_TRUE);
-    gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE);
-    gl.glDepthFunc(gl.GL_LEQUAL);
-    gl.glEnable(gl.GL_DEPTH_TEST);
-    gl.glEnable(gl.GL_CULL_FACE);
-    gl.glCullFace(gl.GL_BACK);
-    gl.glFrontFace(gl.GL_CCW);
+    gl.glDepthMask(GL.GL_TRUE);
+    gl.glColorMask(GL.GL_TRUE, GL.GL_TRUE, GL.GL_TRUE, GL.GL_TRUE);
+    gl.glDepthFunc(GL.GL_LEQUAL);
+    gl.glEnable(GL.GL_DEPTH_TEST);
+    gl.glEnable(GL.GL_CULL_FACE);
+    gl.glCullFace(GL.GL_BACK);
+    gl.glFrontFace(GL.GL_CCW);
     // gl.glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     // gl.glEnable(GL_SAMPLE_ALPHA_TO_ONE);
     gl.glEnable(GL_MULTISAMPLE);
 
-    gl.glEnable(gl.GL_SCISSOR_TEST);
-    gl.glDisable(gl.GL_BLEND);
-    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
+    gl.glEnable(GL.GL_SCISSOR_TEST);
+    gl.glDisable(GL.GL_BLEND);
+    gl.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA);
 
     platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
     platform.optGLBufferData.?(
@@ -1949,7 +1950,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     entry.clear_color.values[2],
                     1,
                 );
-                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
+                gl.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
             },
             .RenderEntryBeginPeels => {
                 const entry: *RenderEntryBeginPeels = @ptrCast(@alignCast(data));
@@ -1969,7 +1970,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 } else {
                     gl.glClearColor(0, 0, 0, 0);
                 }
-                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
+                gl.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
             },
             .RenderEntryEndPeels => {
                 if (open_gl.multisampling) {
@@ -1991,8 +1992,8 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                             0,
                             render_width,
                             render_height,
-                            gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT,
-                            gl.GL_NEAREST,
+                            GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT,
+                            GL.GL_NEAREST,
                         );
                     }
                 }
@@ -2008,11 +2009,11 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, 0);
                     bindFrameBuffer(peel_buffer, render_width, render_height);
                     on_peel_index = 0;
-                    gl.glEnable(gl.GL_BLEND);
+                    gl.glEnable(GL.GL_BLEND);
                 }
             },
             .RenderEntryDepthClear => {
-                gl.glClear(gl.GL_DEPTH_BUFFER_BIT);
+                gl.glClear(GL.GL_DEPTH_BUFFER_BIT);
             },
             .RenderEntryTexturedQuads => {
                 platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
@@ -2038,7 +2039,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
                     program = &open_gl.z_bias_depth_peel;
                     platform.optGLActiveTexture.?(GL_TEXTURE1);
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.depth_handle);
+                    gl.glBindTexture(GL.GL_TEXTURE_2D, peel_buffer.depth_handle);
                     platform.optGLActiveTexture.?(GL_TEXTURE0);
 
                     if (on_peel_index == max_render_target_index) {
@@ -2047,9 +2048,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 }
 
                 platform.optGLActiveTexture.?(GL_TEXTURE2);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data0);
+                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data0);
                 platform.optGLActiveTexture.?(GL_TEXTURE3);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data1);
+                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data1);
                 platform.optGLActiveTexture.?(GL_TEXTURE0);
 
                 useZBiasProgramBegin(program, setup, alpha_threshold);
@@ -2063,9 +2064,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                         const texture_handle: u32 = getSpecialTextureHandleFor(open_gl, texture);
                         gl.glBindTexture(GL_TEXTURE_2D_ARRAY, texture_handle);
                         platform.optGLDrawElementsBaseVertex.?(
-                            gl.GL_TRIANGLES,
+                            GL.GL_TRIANGLES,
                             6,
-                            gl.GL_UNSIGNED_SHORT,
+                            GL.GL_UNSIGNED_SHORT,
                             @ptrFromInt(index_index * @sizeOf(u16)),
                             @intCast(entry.vertex_array_offset),
                         );
@@ -2075,9 +2076,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     // Single dispatch, fast path, for same sized textures.
                     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
                     platform.optGLDrawElementsBaseVertex.?(
-                        gl.GL_TRIANGLES,
+                        GL.GL_TRIANGLES,
                         @intCast(6 * entry.quad_count),
-                        gl.GL_UNSIGNED_SHORT,
+                        GL.GL_UNSIGNED_SHORT,
                         @ptrFromInt(entry.index_array_offset * @sizeOf(u16)),
                         @intCast(entry.vertex_array_offset),
                     );
@@ -2088,7 +2089,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 useProgramEnd(&program.common);
                 if (peeling) {
                     platform.optGLActiveTexture.?(GL_TEXTURE1);
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+                    gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
                     platform.optGLActiveTexture.?(GL_TEXTURE0);
                 }
             },
@@ -2096,17 +2097,17 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 const entry: *RenderEntryLightingTransfer = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryLightingTransfer);
 
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data0);
-                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_FLOAT, entry.light_data0);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data1);
-                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_FLOAT, entry.light_data1);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
+                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data0);
+                gl.glTexSubImage1D(GL.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, GL.GL_RGBA, GL.GL_FLOAT, entry.light_data0);
+                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data1);
+                gl.glTexSubImage1D(GL.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, GL.GL_RGBA, GL.GL_FLOAT, entry.light_data1);
+                gl.glBindTexture(GL.GL_TEXTURE_1D, 0);
             },
         }
     }
 
-    gl.glDisable(gl.GL_DEPTH_TEST);
-    gl.glDisable(gl.GL_BLEND);
+    gl.glDisable(GL.GL_DEPTH_TEST);
+    gl.glDisable(GL.GL_BLEND);
 
     platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, open_gl.resolve_frame_buffer.framebuffer_handle);
     gl.glViewport(0, 0, render_width, render_height);
@@ -2120,16 +2121,16 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, peel_index);
         platform.optGLActiveTexture.?(texture_bind_index);
         texture_bind_index += 1;
-        gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[@backingInt(ColorHandleType.SurfaceReflection)]);
+        gl.glBindTexture(GL.GL_TEXTURE_2D, peel_buffer.color_handle[@backingInt(ColorHandleType.SurfaceReflection)]);
     }
     // platform.optGLActiveTexture.?(texture_bind_index);
     // texture_bind_index += 1;
-    // gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].front_emission_texture);
+    // gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_buffers[0].front_emission_texture);
     // platform.optGLActiveTexture.?(texture_bind_index);
     // texture_bind_index += 1;
-    // gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].normal_position_texture);
+    // gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_buffers[0].normal_position_texture);
 
-    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
+    platform.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
     platform.optGLActiveTexture.?(GL_TEXTURE0);
     useProgramEnd(&open_gl.peel_composite);
 
@@ -2148,7 +2149,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         window_height,
     );
     gl.glClearColor(0, 0, 0, 0);
-    gl.glClear(gl.GL_COLOR_BUFFER_BIT);
+    gl.glClear(GL.GL_COLOR_BUFFER_BIT);
 
     gl.glViewport(
         draw_region.min.x(),
@@ -2164,9 +2165,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     );
 
     useProgramBegin(&open_gl.final_stretch);
-    gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.resolve_frame_buffer.color_handle[0]);
-    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.resolve_frame_buffer.color_handle[0]);
+    platform.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
     platform.optGLActiveTexture.?(GL_TEXTURE0);
     useProgramEnd(&open_gl.final_stretch);
 }
@@ -2238,7 +2239,7 @@ fn drawRectangle(
     const min_uv = opt_min_uv orelse Vector2.splat(0);
     const max_uv = opt_max_uv orelse Vector2.splat(1);
 
-    gl.glBegin(gl.GL_TRIANGLES);
+    gl.glBegin(GL.GL_TRIANGLES);
     {
         // This value is not gamma corrected by OpenGL.
         gl.glColor4f(
@@ -2280,44 +2281,44 @@ pub fn displayBitmap(
 
     bindFrameBuffer(null, draw_region.getWidth(), draw_region.getHeight());
 
-    gl.glDisable(gl.GL_SCISSOR_TEST);
-    gl.glDisable(gl.GL_BLEND);
+    gl.glDisable(GL.GL_SCISSOR_TEST);
+    gl.glDisable(GL.GL_BLEND);
 
-    gl.glBindTexture(gl.GL_TEXTURE_2D, blit_texture);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, blit_texture);
     gl.glTexImage2D(
-        gl.GL_TEXTURE_2D,
+        GL.GL_TEXTURE_2D,
         0,
         GL_SRGB8_ALPHA8,
         width,
         height,
         0,
-        gl.GL_BGRA_EXT,
-        gl.GL_UNSIGNED_BYTE,
+        GL.GL_BGRA_EXT,
+        GL.GL_UNSIGNED_BYTE,
         memory,
     );
 
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP);
 
-    gl.glEnable(gl.GL_TEXTURE_2D);
+    gl.glEnable(GL.GL_TEXTURE_2D);
 
     gl.glClearColor(0, 0, 0, 0);
     gl.glClearColor(clear_color.r(), clear_color.g(), clear_color.b(), clear_color.a());
-    gl.glClear(gl.GL_COLOR_BUFFER_BIT);
+    gl.glClear(GL.GL_COLOR_BUFFER_BIT);
 
     // Reset all transforms.
-    gl.glMatrixMode(gl.GL_TEXTURE);
+    gl.glMatrixMode(GL.GL_TEXTURE);
     gl.glLoadIdentity();
 
-    gl.glMatrixMode(gl.GL_MODELVIEW);
+    gl.glMatrixMode(GL.GL_MODELVIEW);
     gl.glLoadIdentity();
 
     types.notImplemented();
 
     // TODO: This has to be worked out specifically for doing the full-screen draw.
-    gl.glMatrixMode(gl.GL_PROJECTION);
+    gl.glMatrixMode(GL.GL_PROJECTION);
     const a = math.safeRatio1(2, 1);
     const b = math.safeRatio1(2 * @as(f32, @floatFromInt(width)), @as(f32, @floatFromInt(height)));
     const projection: []const f32 = &.{
@@ -2334,8 +2335,8 @@ pub fn displayBitmap(
 
     drawRectangle(min_position, max_position, color, null, null);
 
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
-    gl.glEnable(gl.GL_BLEND);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
+    gl.glEnable(GL.GL_BLEND);
 }
 
 fn createProgram(
