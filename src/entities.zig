@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const types = @import("types.zig");
 const world = @import("world.zig");
+const world_mode = @import("world_mode.zig");
 const brains = @import("brains.zig");
 const asset = @import("asset.zig");
 const asset_rendering = @import("asset_rendering.zig");
@@ -38,6 +39,7 @@ const ParticleCache = particles.ParticleCache;
 const RenderGroup = renderer.RenderGroup;
 const TransientClipRect = renderer.TransientClipRect;
 const RenderTransform = renderer.RenderTransform;
+const IndexedVertexOutput = renderer.IndexedVertexOutput;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const BitmapId = file_formats.BitmapId;
@@ -49,6 +51,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const LightingPoint = lighting.LightingPoint;
 const EditableHitTest = in_game_editor.EditableHitTest;
 
+const DEFAULT_CAMERA_UP = world_mode.DEFAULT_CAMERA_UP;
 const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const ENTITY_MAX_PIECE_COUNT = 4;
 const ENTITY_MAX_GROUND_COVER = 128;
@@ -131,9 +134,15 @@ pub const CameraBehavior = enum(u32) {
 
 const GroundCover = extern struct {
     bitmap: BitmapId,
-    position: Vector3,
-    color: Color3,
-    scale: f32,
+
+    color: u32,
+    normal: Vector3,
+    uv: Vector2,
+    position: [4]Vector3,
+
+    // position: Vector3,
+    // color: Color3,
+    // scale: f32,
 };
 
 const GroundCoverSpec = extern struct {
@@ -373,8 +382,6 @@ pub fn updateAndRenderEntities(
     var iterator: EntityIterator = .iterateAllEntities(sim_region);
     while (iterator.entity) |entity| : (iterator.advance()) {
         if (entity.hasFlag(EntityFlags.Active.toInt())) {
-            TimedBlock.beginBlock(@src(), .EntityBoost);
-
             if (entity.auto_boost_to.getTraversable(sim_region) != null) {
                 var traversable_index: u32 = 0;
                 while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
@@ -395,10 +402,6 @@ pub fn updateAndRenderEntities(
                     }
                 }
             }
-
-            TimedBlock.endBlock(@src(), .EntityBoost);
-
-            TimedBlock.beginBlock(@src(), .EntityPhysics);
 
             const start_position: Vector3 = entity.position;
             switch (entity.movement_mode) {
@@ -494,9 +497,6 @@ pub fn updateAndRenderEntities(
                 }
             }
 
-            TimedBlock.endBlock(@src(), .EntityPhysics);
-
-            TimedBlock.beginBlock(@src(), .EntityRender);
             if (opt_render_group) |render_group| {
                 const entity_ground_point: Vector3 = entity.position;
 
@@ -529,8 +529,6 @@ pub fn updateAndRenderEntities(
                 //
                 // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
                 // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
-
-                TimedBlock.beginBlock(@src(), .EntityRenderPieces);
 
                 var bitmap_infos: [ENTITY_MAX_PIECE_COUNT]?*HHABitmap = @splat(null);
                 var piece_sprites: [ENTITY_MAX_PIECE_COUNT]SpriteValues = undefined;
@@ -631,7 +629,7 @@ pub fn updateAndRenderEntities(
                                 _ = world_radius.setY(world_dim.y());
                                 _ = world_radius.setZ(0.1);
 
-                                var sprite: SpriteValues = .forUpright(
+                                var sprite: SpriteValues = .forUprightByRenderGroup(
                                     render_group,
                                     world_dim,
                                     align_percentage,
@@ -726,19 +724,13 @@ pub fn updateAndRenderEntities(
                         }
                     }
                 }
-                TimedBlock.endBlock(@src(), .EntityRenderPieces);
 
-                TimedBlock.beginBlock(@src(), .EntityRenderGroundCover);
-                drawGroundCover(entity, render_group);
-                TimedBlock.endBlock(@src(), .EntityRenderGroundCover);
+                // drawGroundCover(entity, render_group);
 
-                TimedBlock.beginBlock(@src(), .EntityRenderHitpoints);
                 drawHitPoints(entity, render_group, entity_ground_point);
-                TimedBlock.endBlock(@src(), .EntityRenderHitpoints);
 
                 {
                     if (global_config.Simulation_VisualizeCollisionVolumes) {
-                        TimedBlock.beginBlock(@src(), .EntityRenderVolume);
                         if (entity.collision_volume.hasArea()) {
                             var color: Color = .new(0, 0.5, 1, 1);
 
@@ -752,7 +744,6 @@ pub fn updateAndRenderEntities(
                                 0.01,
                             );
                         }
-                        TimedBlock.endBlock(@src(), .EntityRenderVolume);
                     }
 
                     if (false) {
@@ -795,10 +786,20 @@ pub fn updateAndRenderEntities(
                         light_probe_count += 1;
                     }
                 }
-                TimedBlock.endBlock(@src(), .EntityRender);
             }
         }
     }
+
+    TimedBlock.beginBlock(@src(), .DrawGroundCover);
+    if (opt_render_group) |render_group| {
+        iterator = .iterateAllEntities(sim_region);
+        while (iterator.entity) |entity| : (iterator.advance()) {
+            if (entity.hasFlag(EntityFlags.Active.toInt())) {
+                drawGroundCover(entity, render_group);
+            }
+        }
+    }
+    TimedBlock.endBlock(@src(), .DrawGroundCover);
 
     DebugInterface.debugBeginDataBlock(@src(), "Lighting");
     {
@@ -826,43 +827,30 @@ fn stompOnEntity(
 }
 
 fn drawGroundCover(entity: *Entity, render_group: *RenderGroup) void {
-    if (false) {
-        const assets: *Assets = render_group.assets;
+    const assets: *Assets = render_group.assets;
 
-        var cover_index: u32 = 0;
-        while (cover_index < entity.ground_cover_count) : (cover_index += 1) {
-            const cover: *GroundCover = &entity.ground_cover[cover_index];
+    var out: IndexedVertexOutput = render_group.outputQuads(entity.ground_cover_count);
 
-            const texture_handle: RendererTexture = assets.getBitmap(cover.bitmap);
-            if (texture_handle.isValid()) {
-                const bitmap_info: *HHABitmap = assets.getBitmapInfo(cover.bitmap);
-                const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(bitmap_info, cover.scale);
-                const x_axis: Vector2 = .new(1, 0);
-                const y_axis: Vector2 = .new(0, 1);
-                const align_percentage: Vector2 = .new(0.5, 0);
+    var cover_index: u32 = 0;
+    while (cover_index < entity.ground_cover_count) : (cover_index += 1) {
+        const cover: *GroundCover = &entity.ground_cover[cover_index];
+        const texture_handle: RendererTexture = assets.getBitmap(cover.bitmap);
 
-                const sprite: SpriteValues = .forUpright(
-                    render_group,
-                    world_dim,
-                    align_percentage,
-                    x_axis,
-                    y_axis,
-                    null,
-                );
-
-                render_group.pushSprite(
-                    texture_handle,
-                    sprite.min_position.plus(entity.position).plus(cover.position),
-                    sprite.scaled_x_axis,
-                    sprite.scaled_y_axis,
-                    cover.color.toColor(1),
-                    null,
-                    null,
-                );
-            } else {
-                assets.loadBitmap(cover.bitmap);
-                render_group.missing_resource_count += 1;
-            }
+        if (texture_handle.isValid()) {
+            const texture_index: u16 = @intCast(renderer.textureIndexFrom(texture_handle));
+            const uv0: Vector2 = .new(0, 0);
+            const uv1: Vector2 = .new(cover.uv.x(), 0);
+            const uv2: Vector2 = .new(cover.uv.x(), cover.uv.y());
+            const uv3: Vector2 = .new(0, cover.uv.y());
+            out.vertexOut(0, cover.position[0].plus(entity.position), cover.normal, uv0, cover.color, texture_index);
+            out.vertexOut(1, cover.position[1].plus(entity.position), cover.normal, uv1, cover.color, texture_index);
+            out.vertexOut(2, cover.position[2].plus(entity.position), cover.normal, uv2, cover.color, texture_index);
+            out.vertexOut(3, cover.position[3].plus(entity.position), cover.normal, uv3, cover.color, texture_index);
+            out.quadIndexOut(0);
+            out.advanceQuads(1);
+        } else {
+            assets.loadBitmap(cover.bitmap);
+            render_group.missing_resource_count += 1;
         }
     }
 }
@@ -952,10 +940,42 @@ pub fn fillUnpackedEntity(entity: *Entity, sim_region: *SimRegion, assets: *Asse
                 );
 
                 match_vector.e[AssetTagId.Variant.toInt()] = cover_series.randomUnilateral();
+
+                const color: Color3 = .new(1, 1, 1);
                 cover.bitmap = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector);
-                cover.position = entity.collision_volume.pointFromUVW(random_uvw);
-                cover.color = .new(1, 1, 1);
-                cover.scale = 0.3;
+                cover.color = renderer.finalizeColor3(color);
+                cover.normal = .new(0, -1, 0); // TODO: Adjust this once lighting is working.
+
+                const base_position: Vector3 = entity.collision_volume.pointFromUVW(random_uvw);
+                const scale: f32 = 0.3;
+
+                const bitmap_info: *HHABitmap = assets.getBitmapInfo(cover.bitmap);
+                const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(bitmap_info, scale);
+
+                const x_axis: Vector2 = .new(1, 0);
+                const world_up: Vector3 = .new(0, 0, 1);
+                const x_axis_hybrid: Vector3 = .new(1, 0, 0);
+                const y_axis: Vector2 = .new(0, 1);
+                const align_percentage: Vector2 = .new(0.5, 0);
+                const camera_up: Vector3 = DEFAULT_CAMERA_UP;
+
+                const sprite: SpriteValues = .forUpright(
+                    world_up,
+                    camera_up,
+                    x_axis_hybrid,
+                    world_dim,
+                    align_percentage,
+                    x_axis,
+                    y_axis,
+                    null,
+                );
+
+                const min_position: Vector3 = sprite.min_position.plus(base_position);
+                cover.position[0] = min_position;
+                cover.position[1] = min_position.plus(sprite.scaled_x_axis);
+                cover.position[2] = min_position.plus(sprite.scaled_x_axis).plus(sprite.scaled_y_axis);
+                cover.position[3] = min_position.plus(sprite.scaled_y_axis);
+                cover.uv = renderer.getUVScaleForBitmap(assets, bitmap_info.dim[0], bitmap_info.dim[1]);
 
                 cover_index += 1;
             }

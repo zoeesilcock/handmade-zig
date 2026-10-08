@@ -24,6 +24,9 @@ const debug_interface = @import("debug_interface.zig");
 const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
 
+pub const DEFAULT_CAMERA_PITCH: f32 = 0.125 * math.PI32;
+pub const DEFAULT_CAMERA_UP: Vector3 = .new(0, 0.923875, 0.38268346);
+
 var global_config = &@import("config.zig").global_config;
 
 // Types.
@@ -452,7 +455,7 @@ pub fn updateAndRenderWorld(
     var reset_debug_cam: bool = false;
 
     const focal_length: f32 = 1.5;
-    world_mode.camera_pitch = 0.125 * math.PI32;
+    world_mode.camera_pitch = DEFAULT_CAMERA_PITCH;
     world_mode.camera_orbit = 0;
 
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);

@@ -516,7 +516,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     }
 
     open_gl.default_sprite_texture_format = GL.GL_RGBA8;
-    open_gl.default_framebuffer_texture_format = GL.GL_RGBA16;
+    open_gl.default_framebuffer_texture_format = GL.GL_RGBA8;
 
     if (ALLOW_GPU_SRGB) {
         if (info.gl_ext_texture_srgb) {
@@ -1455,9 +1455,6 @@ fn bindFrameBuffer(framebuffer: ?*Framebuffer, render_width: i32, render_height:
     if (platform.optGLBindFramebufferEXT) |glBindFramebuffer| {
         glBindFramebuffer(GL_FRAMEBUFFER, if (framebuffer) |f| f.framebuffer_handle else 0);
         gl.glViewport(0, 0, render_width, render_height);
-
-        const frame_buffer_status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
-        std.debug.assert(frame_buffer_status == GL_FRAME_BUFFER_COMPLETE);
     }
 }
 
@@ -2039,8 +2036,6 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 if (on_peel_index < max_render_target_index) {
                     header_at = peel_header_restore;
                     on_peel_index += 1;
-
-                    bindFrameBuffer(&open_gl.depth_peel_buffer, render_width, render_height);
                 } else {
                     std.debug.assert(on_peel_index == max_render_target_index);
 

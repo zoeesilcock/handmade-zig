@@ -43,6 +43,7 @@ const MatrixInverse4x4 = math.MatrixInverse4x4;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const TicketMutex = types.TicketMutex;
+const HHABitmap = file_formats.HHABitmap;
 const ArenaPushParams = shared.ArenaPushParams;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
@@ -59,6 +60,54 @@ const TextureOpState = enum(u32) {
     Empty,
     PendingLoad,
     ReadyToTransfer,
+};
+
+pub const IndexedVertexOutput = struct {
+    vertex_at: [*]TexturedVertex = undefined,
+    index_at: [*]u16 = undefined,
+
+    base_index: u16 = 0,
+
+    pub fn vertexOut(
+        self: *IndexedVertexOutput,
+        vertex_offset: u32,
+        position: Vector3,
+        normal: Vector3,
+        uv: Vector2,
+        color: u32,
+        texture_index: u16,
+    ) void {
+        self.vertex_at[vertex_offset].position = position.toVector4(0);
+        self.vertex_at[vertex_offset].normal = normal;
+        self.vertex_at[vertex_offset].uv = uv;
+        self.vertex_at[vertex_offset].color = color;
+        self.vertex_at[vertex_offset].texture_index = texture_index;
+        self.vertex_at[vertex_offset].emission = 0;
+        self.vertex_at[vertex_offset].reserved = 0;
+    }
+
+    pub fn quadIndexOut(
+        self: *IndexedVertexOutput,
+        index_offset: u32,
+    ) void {
+        self.index_at[index_offset + 0] = self.base_index + 0;
+        self.index_at[index_offset + 1] = self.base_index + 1;
+        self.index_at[index_offset + 2] = self.base_index + 2;
+        self.index_at[index_offset + 3] = self.base_index + 0;
+        self.index_at[index_offset + 4] = self.base_index + 2;
+        self.index_at[index_offset + 5] = self.base_index + 3;
+    }
+
+    pub fn advance(self: *IndexedVertexOutput, vertex_count: u32, index_count: u32) void {
+        std.debug.assert((self.base_index + vertex_count) <= std.math.maxInt(u16));
+        self.vertex_at += vertex_count;
+        self.index_at += index_count;
+        self.base_index += @intCast(vertex_count);
+    }
+
+    pub fn advanceQuads(self: *IndexedVertexOutput, quad_count: u32) void {
+        self.advance(quad_count * 4, quad_count * 6);
+    }
 };
 
 pub const TextureOp = extern struct {
@@ -220,6 +269,8 @@ pub const RenderCommands = extern struct {
     pub fn reset(self: *RenderCommands) void {
         self.push_buffer_data_at = self.push_buffer_base;
         self.vertex_count = 0;
+        self.index_count = 0;
+        self.quad_texture_count = 0;
     }
 };
 
@@ -642,10 +693,7 @@ pub const RenderGroup = extern struct {
 
         entry.?.quad_count += 1;
 
-        var inverse_uv: Vector2 = .new(
-            @as(f32, @floatFromInt(texture.values.width)) / TEXTURE_ARRAY_DIM,
-            @as(f32, @floatFromInt(texture.values.height)) / TEXTURE_ARRAY_DIM,
-        );
+        var inverse_uv: Vector2 = getUVScaleForRegularTexture(texture);
 
         const texture_index32: u32 = textureIndexFrom(texture);
         var texture_index: u16 = @truncate(texture_index32);
@@ -1079,8 +1127,7 @@ pub const RenderGroup = extern struct {
         const basis_position = position.minus(dimension.scaledTo(0.5).toVector3(0));
 
         if (self.getCurrentQuads(1, self.white_texture) != null) {
-            const premultiplied_color: Color = storeColor(color);
-            const packed_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+            const packed_color: u32 = finalizeColor(color);
 
             const min_position: Vector3 = basis_position;
             const max_position: Vector3 = basis_position.plus(dimension.toVector3(0));
@@ -1241,8 +1288,7 @@ pub const RenderGroup = extern struct {
             const y_axis =
                 x_axis_hybrid.scaledTo(y_axis2.x()).plus(y_axis_hybrid.scaledTo(y_axis2.y())).scaledTo(size.y());
 
-            const premultiplied_color: Color = storeColor(color);
-            const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+            const vertex_color: u32 = finalizeColor(color);
 
             const min_position: Vector3 = ground_position.minus(x_axis.scaledTo(0.5));
             const min_x_min_y: Vector4 = min_position.toVector4(0);
@@ -1286,8 +1332,7 @@ pub const RenderGroup = extern struct {
             const min_uv: Vector2 = opt_min_uv orelse .new(0, 0);
             const max_uv: Vector2 = opt_max_uv orelse .new(1, 1);
 
-            const premultiplied_color: Color = storeColor(color);
-            const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+            const vertex_color: u32 = finalizeColor(color);
 
             const min_x_min_y: Vector4 = min_position.toVector4(0);
             const min_x_max_y: Vector4 = min_position.plus(scaled_y_axis).toVector4(0);
@@ -1433,6 +1478,37 @@ pub const RenderGroup = extern struct {
             self.debug_transform = self.game_transform;
         }
     }
+
+    pub fn outputVerts(self: *RenderGroup, vertex_count: u32, index_count: u32) IndexedVertexOutput {
+        var result: IndexedVertexOutput = .{};
+        if (vertex_count > 0 or index_count > 0) {
+            const null_texture: RendererTexture = .empty;
+            const entry: ?*RenderEntryTexturedQuads = self.getCurrentQuads(index_count / 6, null_texture);
+
+            const commands: *RenderCommands = self.commands;
+            const vertex_index: u32 = commands.vertex_count;
+            const index_index: u32 = commands.index_count;
+
+            commands.vertex_count += vertex_count;
+            commands.index_count += index_count;
+            std.debug.assert(commands.vertex_count <= commands.max_vertex_count);
+            std.debug.assert(commands.index_count <= commands.max_index_count);
+
+            result = .{
+                .vertex_at = commands.vertex_array + vertex_index,
+                .index_at = commands.index_array + index_index,
+                .base_index = @intCast(vertex_index - entry.?.vertex_array_offset),
+            };
+
+            entry.?.quad_count += (index_count / 6);
+        }
+        return result;
+    }
+
+    pub fn outputQuads(self: *RenderGroup, quad_count: u32) IndexedVertexOutput {
+        const result = self.outputVerts(quad_count * 4, quad_count * 6);
+        return result;
+    }
 };
 
 pub fn storeColor(source: Color) Color {
@@ -1444,6 +1520,18 @@ pub fn storeColor(source: Color) Color {
     _ = dest.setB(dest.a() * source.b());
 
     return dest;
+}
+
+pub fn finalizeColor(unpremultiplied: Color) u32 {
+    const premultiplied_color: Color = storeColor(unpremultiplied);
+    const packed_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+    return packed_color;
+}
+
+pub fn finalizeColor3(unpremultiplied: Color3) u32 {
+    const premultiplied_color: Color = storeColor(unpremultiplied.toColor(1));
+    const packed_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+    return packed_color;
 }
 
 fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
@@ -1562,6 +1650,25 @@ pub fn specialTextureIndexFrom(index: u32) u32 {
 
 pub fn textureIndexFrom(texture: RendererTexture) u32 {
     return texture.values.index & ~@as(u32, @intCast(SPECIAL_TEXTURE_BIT));
+}
+
+pub fn getUVScaleForRegularTexture(texture: RendererTexture) Vector2 {
+    const result: Vector2 = .new(
+        @as(f32, @floatFromInt(texture.values.width)) / TEXTURE_ARRAY_DIM,
+        @as(f32, @floatFromInt(texture.values.height)) / TEXTURE_ARRAY_DIM,
+    );
+    return result;
+}
+
+pub fn getUVScaleForBitmap(assets: *asset.Assets, width: u32, height: u32) Vector2 {
+    var result: Vector2 = .new(1, 1);
+    if (!assets.dimensionsRequireSpecialTexture(width, height)) {
+        result = .new(
+            @as(f32, @floatFromInt(width)) / TEXTURE_ARRAY_DIM,
+            @as(f32, @floatFromInt(height)) / TEXTURE_ARRAY_DIM,
+        );
+    }
+    return result;
 }
 
 pub fn encodeCubeUVLayout(

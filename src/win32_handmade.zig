@@ -2114,7 +2114,7 @@ pub export fn WinMain(
             }
             const renderer_dc = win32.GetDC(window_handle);
 
-            const max_quad_count_per_frame: u32 = 1 << 18;
+            const max_quad_count_per_frame: u32 = 1 << 20;
             var limits: renderer.PlatformRendererLimits = .{
                 .max_quad_count_per_frame = max_quad_count_per_frame,
                 .max_texture_count = shared.NORMAL_TEXTURE_COUNT,

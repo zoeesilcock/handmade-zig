@@ -609,8 +609,8 @@ pub const Assets = struct {
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) u32 {
-        TimedBlock.beginFunction(@src(), .GetBestMatchAsset);
-        defer TimedBlock.endFunction(@src(), .GetBestMatchAsset);
+        // TimedBlock.beginFunction(@src(), .GetBestMatchAsset);
+        // defer TimedBlock.endFunction(@src(), .GetBestMatchAsset);
 
         var result: u32 = 0;
         var best_match: f32 = 0;
@@ -657,7 +657,7 @@ pub const Assets = struct {
         self.loadBitmap(opt_id);
     }
 
-    fn dimensionsRequireSpecialTexture(self: *Assets, width: u32, height: u32) bool {
+    pub fn dimensionsRequireSpecialTexture(self: *Assets, width: u32, height: u32) bool {
         _ = self;
         return width >= TEXTURE_ARRAY_DIM or height >= TEXTURE_ARRAY_DIM;
     }

@@ -6,7 +6,7 @@ const Translator = @import("translate_c").Translator;
 const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
-const SLOW_DEFAULT = false;
+const SLOW_DEFAULT = true;
 const EMIT_ASM = false;
 
 const Package = enum(u32) {

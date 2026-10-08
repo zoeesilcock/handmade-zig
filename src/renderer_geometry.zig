@@ -24,8 +24,30 @@ pub const SpriteValues = struct {
     scaled_y_axis: Vector3,
     z_displacement: f32 = 0,
 
-    pub fn forUpright(
+    pub fn forUprightByRenderGroup(
         render_group: *RenderGroup,
+        world_dim: Vector2,
+        align_percentage: Vector2,
+        opt_x_axis: ?Vector2,
+        opt_y_axis: ?Vector2,
+        opt_t_camera_up: ?f32,
+    ) SpriteValues {
+        return .forUpright(
+            render_group.world_up,
+            render_group.game_transform.y,
+            render_group.game_transform.x,
+            world_dim,
+            align_percentage,
+            opt_x_axis,
+            opt_y_axis,
+            opt_t_camera_up,
+        );
+    }
+
+    pub fn forUpright(
+        world_up: Vector3,
+        camera_up: Vector3,
+        x_axis_hybrid: Vector3,
         world_dim: Vector2,
         align_percentage: Vector2,
         opt_x_axis: ?Vector2,
@@ -36,9 +58,6 @@ pub const SpriteValues = struct {
         const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
         const t_camera_up: f32 = opt_t_camera_up orelse 0.5;
 
-        const world_up: Vector3 = render_group.world_up;
-        const camera_up: Vector3 = render_group.game_transform.y;
-        const x_axis_hybrid: Vector3 = render_group.game_transform.x;
         const y_axis_hybrid: Vector3 = world_up.lerp(camera_up, t_camera_up).normalizeOrZero();
 
         const x_axis =
