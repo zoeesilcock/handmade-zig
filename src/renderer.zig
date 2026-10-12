@@ -262,6 +262,18 @@ pub const RenderCommands = extern struct {
     index_count: u32,
     index_array: [*]u16 = undefined,
 
+    max_light_probe_count: u32,
+    light_probe_count: u32,
+    // TODO: Encode light_probe_irradiance as u32s.
+    light_probe_irradiance: [*]Color3, // [max_light_probe_count][6]
+
+    light_index_voxel_dimension: u32,
+    light_index_voxel: [*]u16, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
+
+    max_light_occluder_count: u32,
+    light_occluder_count: u32,
+    light_occluders: [*]LightingBox,
+
     max_quad_texture_count: u32,
     quad_texture_count: u32,
     quad_textures: [*]RendererTexture,
@@ -420,9 +432,6 @@ pub const RenderGroup = extern struct {
 
     lighting_enabled: bool,
     light_bounds: Rectangle3,
-    light_box_count: u32,
-    light_boxes: [*]LightingBox,
-    light_point_index: u16,
 
     debug_tag: u32,
 
@@ -483,9 +492,6 @@ pub const RenderGroup = extern struct {
             .current_quads = null,
             .lighting_enabled = false,
             .light_bounds = .zero(),
-            .light_box_count = 0,
-            .light_boxes = undefined,
-            .light_point_index = 0,
         };
 
         var initial_setup: RenderSetup = .{
@@ -522,6 +528,11 @@ pub const RenderGroup = extern struct {
 
         // TODO:
         // self.commands.missing_resource_count += self.missing_resource_count
+    }
+
+    pub fn enableLighting(self: *RenderGroup, light_bounds: Rectangle3) void {
+        self.lighting_enabled = true;
+        self.light_bounds = light_bounds;
     }
 
     pub fn allResourcesPresent(self: *RenderGroup) bool {
@@ -919,6 +930,7 @@ pub const RenderGroup = extern struct {
         opt_emission: ?f32,
         opt_z_bias: ?f32,
     ) void {
+        const commands: *RenderCommands = self.commands;
         const uv_layout: CubeUVLayout = opt_uv_layout orelse .default;
         const emission = opt_emission orelse 0;
         const z_bias: f32 = opt_z_bias orelse 0;
@@ -927,11 +939,11 @@ pub const RenderGroup = extern struct {
         std.debug.assert(emission <= 1);
 
         if (self.getCurrentQuads(6, texture) != null) {
-            // TODO: Do we want lighting boxes to work with the entity cache, too?
             if (self.lighting_enabled) {
-                std.debug.assert(self.light_box_count < MAX_LIGHT_BOX_COUNT);
-                const box: *LightingBox = &self.light_boxes[self.light_box_count];
-                self.light_box_count += 1;
+                // TODO: We don't really want to use the textures, probably, for lighting? Or maybe we do?
+                std.debug.assert(commands.light_occluder_count < commands.max_light_occluder_count);
+                const box: *LightingBox = &commands.light_occluders[commands.light_occluder_count];
+                commands.light_occluder_count += 1;
 
                 box.position = position;
                 box.radius = radius;

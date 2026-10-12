@@ -68,6 +68,10 @@ pub const World = struct {
     null_entity: *Entity,
 
     unpacked_entity_threshold: u32 = 0,
+
+    light_probe_slot_count: u32,
+    light_probe_slots: [*]u32,
+    first_free_light_probe_slot: u32,
 };
 
 pub const WorldChunk = extern struct {
@@ -142,7 +146,11 @@ pub const WorldPosition = extern struct {
     }
 };
 
-pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryArena) *World {
+pub fn createWorld(
+    chunk_dimension_in_meters: Vector3,
+    parent_arena: *MemoryArena,
+    max_light_probe_count: u32,
+) *World {
     var world: *World = parent_arena.pushStruct(World, null, @src());
 
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
@@ -158,6 +166,16 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.unpacked_entity_count = 0;
 
     world.null_entity = world.arena.pushStruct(Entity, null, @src());
+
+    world.light_probe_slot_count = max_light_probe_count;
+    world.light_probe_slots = world.arena.pushArray(world.light_probe_slot_count, u32, null, @src());
+    var light_probe_index: u32 = 0;
+    while (light_probe_index < (world.light_probe_slot_count - 1)) : (light_probe_index += 1) {
+        world.light_probe_slots[light_probe_index] = light_probe_index + 1;
+    }
+    world.light_probe_slots[0] = 0;
+    world.first_free_light_probe_slot = 1;
+    world.light_probe_slots[world.light_probe_slot_count - 1] = 0;
 
     return world;
 }
@@ -431,6 +449,9 @@ pub fn acquireUnpackedEntitySlot(world: *World) *Entity {
 }
 
 fn packEntity(world: *World, entity_position: WorldPosition, entity: *Entity) void {
+    removeIndices(world, entity);
+    std.debug.assert(entity.light_probe_index == 0);
+
     const packed_entity_size: u16 = @offsetOf(Entity, "discard_everything_after");
 
     var chunk_position: WorldPosition = entity_position;
@@ -441,6 +462,27 @@ fn packEntity(world: *World, entity_position: WorldPosition, entity: *Entity) vo
     const dest_e: *align(1) anyopaque =
         @ptrCast(useChunkSpaceAt(world, packed_entity_size, chunk_position));
     _ = shared.copy(packed_entity_size, entity, dest_e);
+}
+
+fn assignIndices(world: *World, entity: *Entity) void {
+    std.debug.assert(entity.light_probe_index == 0);
+
+    if (sim.isLightProbe(entity)) {
+        std.debug.assert(world.first_free_light_probe_slot != 0);
+        entity.light_probe_index = world.first_free_light_probe_slot;
+        world.first_free_light_probe_slot = world.light_probe_slots[world.first_free_light_probe_slot];
+    }
+}
+
+fn removeIndices(world: *World, entity: *Entity) void {
+    if (sim.isLightProbe(entity)) {
+        if (entity.light_probe_index != 0) {
+            world.light_probe_slots[entity.light_probe_index] = world.first_free_light_probe_slot;
+            world.first_free_light_probe_slot = entity.light_probe_index;
+        }
+
+        entity.light_probe_index = 0;
+    }
 }
 
 pub fn ensureRegionIsUnpacked(
@@ -468,6 +510,7 @@ pub fn ensureRegionIsUnpacked(
             var removed_from_unpacked: bool = false;
 
             if (entity.hasFlag(EntityFlags.Deleted.toInt())) {
+                removeIndices(world, entity);
                 removed_from_unpacked = true;
             } else {
 
@@ -539,7 +582,7 @@ pub fn ensureRegionIsUnpacked(
                             dest.position = dest.position.plus(chunk_delta);
 
                             entities.fillUnpackedEntity(dest, sim_region, assets);
-
+                            assignIndices(world, dest);
                             sim.registerEntity(sim_region, dest);
                         }
                     }
@@ -575,6 +618,7 @@ pub fn clearUnpackedEntityCache(world: *World) void {
         const entity: *Entity = &world.unpacked_entities[entity_index];
         const entity_position: WorldPosition = mapIntoChunkSpace(world, world.unpack_origin, entity.position);
         packEntity(world, entity_position, entity);
+        std.debug.assert(entity.light_probe_index == 0);
     }
     world.unpacked_entity_count = 0;
 }

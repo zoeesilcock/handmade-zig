@@ -50,11 +50,6 @@ pub const LIGHT_LOOKUP_VOXEL_DIM = 128;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
 const SLOW = shared.SLOW;
 
-pub const LightingTextures = extern struct {
-    light_data0: [LIGHT_DATA_WIDTH]Vector4, // Px, Py, Pz, Dx
-    light_data1: [LIGHT_DATA_WIDTH]Vector4, // SignDz*Cr, Cg, Cb, Dy
-};
-
 const LightProbe = extern struct {
     position: Vector3 = .zero(),
     colors: [6]Color3 = @splat(.zero()),
@@ -776,11 +771,26 @@ pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
     solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true), @src());
     solution.accumulated_pps = arena.pushArray(6 * LIGHT_DATA_WIDTH, Color3, .aligned(64, true), @src());
     solution.sampling_spheres = &sampling_spheres.light_sampling_sphere_table;
+    // solution.light_boxes = arena.pushArray()
 }
 
-pub fn lightingTest(
-    group: *RenderGroup,
+pub fn beginLightingComputation(
     solution: *LightingSolution,
+    group: *RenderGroup,
+    light_bounds: Rectangle3,
+    enable_lighting: bool,
+) void {
+    _ = solution;
+    //
+
+    if (enable_lighting) {
+        group.enableLighting(light_bounds);
+    }
+}
+
+pub fn endLightingComputation(
+    solution: *LightingSolution,
+    group: *RenderGroup,
     lighting_queue: *shared.PlatformWorkQueue,
 ) void {
     TimedBlock.beginFunction(@src(), .LightingTest);
@@ -809,9 +819,9 @@ pub fn lightingTest(
         solution.debug_line_count = 0;
     }
     solution.box_reference_count = 0;
-    solution.box_count = @intCast(group.light_box_count);
+    solution.box_count = @intCast(group.commands.light_occluder_count);
     const original_box_count: u32 = solution.box_count;
-    solution.boxes = group.light_boxes;
+    solution.boxes = group.commands.light_occluders;
     // solution.point_count = group.light_point_index;
 
     const t_update: f32 = 0.05;
@@ -1033,6 +1043,28 @@ pub fn lightingTest(
             );
         }
     }
+
+    if (false) {
+        TimedBlock.beginFunction(@src(), .OutputLightingTextures);
+        defer TimedBlock.endFunction(@src(), .OutputLightingTextures);
+
+        var point_index: u32 = 1; // Light point index 0 is never used.
+        while (point_index < solution.point_count) : (point_index += 1) {
+            const point: *LightingPoint = &solution.points[point_index];
+            // const position: Vector3 = point.position;
+            var color: Color3 = solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
+            const direction: Vector3 = point.normal;
+
+            if (direction.z() < 0) {
+                // _ = direction.setZ(-direction.z());
+                // Negate the red channel to indicate that Z was negative, since we have no storage for the sign of Z.
+                _ = color.setR(-color.r());
+            }
+
+            // dest.light_data0[point.pack_index] = .new(position.x(), position.y(), position.z(), direction.x());
+            // dest.light_data1[point.pack_index] = .new(color.r(), color.g(), color.b(), direction.y());
+        }
+    }
 }
 
 fn outputLightingPointsRecurse(
@@ -1132,53 +1164,6 @@ fn outputLightingPointsRecurse(
                 getBox(solution, (box.first_child_index + child_index)),
                 depth - 1,
             );
-        }
-    }
-}
-
-pub fn outputLightingPoints(
-    group: *RenderGroup,
-    solution: *LightingSolution,
-    opt_textures: ?*LightingTextures,
-) void {
-    TimedBlock.beginFunction(@src(), .OutputLightingPoints);
-    defer TimedBlock.endFunction(@src(), .OutputLightingPoints);
-
-    if (false) {
-        _ = opt_textures;
-        _ = group.getCurrentQuads(solution.point_count, group.white_texture);
-
-        outputLightingPointsRecurse(
-            group,
-            solution,
-            getBox(solution, solution.root_box_index),
-            solution.debug_box_draw_depth,
-        );
-    }
-}
-
-pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, dest: *LightingTextures) void {
-    _ = group;
-
-    TimedBlock.beginFunction(@src(), .OutputLightingTextures);
-    defer TimedBlock.endFunction(@src(), .OutputLightingTextures);
-
-    if (false) {
-        var point_index: u32 = 1; // Light point index 0 is never used.
-        while (point_index < solution.point_count) : (point_index += 1) {
-            const point: *LightingPoint = &solution.points[point_index];
-            const position: Vector3 = point.position;
-            var color: Color3 = solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
-            const direction: Vector3 = point.normal;
-
-            if (direction.z() < 0) {
-                // _ = direction.setZ(-direction.z());
-                // Negate the red channel to indicate that Z was negative, since we have no storage for the sign of Z.
-                _ = color.setR(-color.r());
-            }
-
-            dest.light_data0[point.pack_index] = .new(position.x(), position.y(), position.z(), direction.x());
-            dest.light_data1[point.pack_index] = .new(color.r(), color.g(), color.b(), direction.y());
         }
     }
 }

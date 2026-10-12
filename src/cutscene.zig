@@ -239,7 +239,7 @@ const cutscenes = [_]Cutscene{
     Cutscene{ .scene_count = intro_cutscene.len, .scenes = @ptrCast(intro_cutscene) },
 };
 
-fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
+fn checkForMetaInput(state: *shared.State, input: *shared.GameInput, render_commands: *RenderCommands) bool {
     var result: bool = false;
 
     for (&input.controllers) |controller| {
@@ -247,7 +247,7 @@ fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
             input.quit_requested = true;
             break;
         } else if (controller.start_button.wasPressed()) {
-            world_mode.playWorld(state);
+            world_mode.playWorld(state, render_commands.max_light_probe_count);
             result = true;
             break;
         }
@@ -271,7 +271,7 @@ pub fn updateAndRenderTitleScreen(
     input: *shared.GameInput,
     title_screen: *GameModeTitleScreen,
 ) bool {
-    const result = checkForMetaInput(state, input);
+    const result = checkForMetaInput(state, input, render_commands);
 
     if (!result) {
         const background_color: Color = .new(0, 0, 0, 0);
@@ -355,7 +355,7 @@ pub fn updateAndRenderCutscene(
     cutscene: *GameModeCutscene,
 ) bool {
     const assets: *Assets = state.assets;
-    const result = checkForMetaInput(state, input);
+    const result = checkForMetaInput(state, input, render_commands);
 
     if (!result) {
         var render_group = RenderGroup.begin(

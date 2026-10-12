@@ -210,6 +210,9 @@ const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 const DEPTH_COMPONENT_BYTES_PER_SAMPLE = 4;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
+const LIGHT_INDEX_VOXEL_DIMENSION = 128;
+const MAX_LIGHT_PROBE_COUNT = 65536;
+const MAX_LIGHT_OCCLUDER_COUNT = 65536;
 
 const PlatformRenderer = renderer.PlatformRenderer;
 const RenderCommands = renderer.RenderCommands;
@@ -230,6 +233,7 @@ const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Vector2u = math.Vector2u;
 const Color = math.Color;
+const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
@@ -396,6 +400,10 @@ pub const OpenGL = extern struct {
     peel_composite: OpenGLProgramCommon = undefined, // Composite all passes.
     final_stretch: OpenGLProgramCommon = undefined,
     resolve_multisample: ResolveMultisampleProgram = undefined,
+
+    light_probe_irradiance: [6 * MAX_LIGHT_PROBE_COUNT]Color3 = undefined,
+    light_index_voxel: [LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION]u16 = undefined,
+    light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
 
     light_data0: u32 = 0,
     light_data1: u32 = 0,
@@ -1881,6 +1889,17 @@ pub fn beginFrame(
     commands.index_count = 0;
     commands.vertex_array = open_gl.vertex_array;
     commands.index_array = open_gl.index_array;
+
+    commands.max_light_probe_count = MAX_LIGHT_PROBE_COUNT;
+    commands.light_probe_count = 0;
+    commands.light_probe_irradiance = &open_gl.light_probe_irradiance;
+
+    commands.light_index_voxel_dimension = LIGHT_INDEX_VOXEL_DIMENSION;
+    commands.light_index_voxel = &open_gl.light_index_voxel;
+
+    commands.max_light_occluder_count = MAX_LIGHT_OCCLUDER_COUNT;
+    commands.light_occluder_count = 0;
+    commands.light_occluders = &open_gl.light_occluders;
 
     commands.max_quad_texture_count = open_gl.max_quad_texture_count;
     commands.quad_texture_count = 0;

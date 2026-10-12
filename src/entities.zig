@@ -239,6 +239,9 @@ pub const Entity = extern struct {
     ground_cover_count: u32,
     ground_cover: [ENTITY_MAX_GROUND_COVER]GroundCover,
 
+    light_probe_clear: bool,
+    light_probe_index: u32,
+
     pub fn isDeleted(self: *const Entity) bool {
         return self.hasFlag(EntityFlags.Deleted.toInt());
     }
@@ -376,8 +379,6 @@ pub fn updateAndRenderEntities(
             picking_ray = cursor_in_world.minus(picking_origin).normalizeOrZero();
         }
     }
-
-    var light_probe_count: u32 = 0;
 
     var iterator: EntityIterator = .iterateAllEntities(sim_region);
     while (iterator.entity) |entity| : (iterator.advance()) {
@@ -725,7 +726,7 @@ pub fn updateAndRenderEntities(
                     }
                 }
 
-                // drawGroundCover(entity, render_group);
+                drawGroundCover(entity, render_group);
 
                 drawHitPoints(entity, render_group, entity_ground_point);
 
@@ -770,40 +771,32 @@ pub fn updateAndRenderEntities(
                         }
                     }
 
-                    if (sim.isLightProbe(entity)) {
+                    if (entity.light_probe_index != 0) {
+                        std.debug.assert(sim.isLightProbe(entity));
                         if (global_config.Lighting_ShowProbes) {
-                            //
                             render_group.pushCube(
                                 render_group.white_texture,
                                 entity.position,
                                 .splat(0.04),
-                                .new(1, 0, 1, 1),
+                                .new(1, 1, 1, 1),
                                 null,
                                 null,
                                 0,
                             );
                         }
-                        light_probe_count += 1;
+
+                        if (entity.light_probe_clear) {
+                            // TODO; Clear the light probe table for this entry so we don't get residual lighting leaks.
+                        }
                     }
                 }
             }
         }
     }
 
-    TimedBlock.beginBlock(@src(), .DrawGroundCover);
-    if (opt_render_group) |render_group| {
-        iterator = .iterateAllEntities(sim_region);
-        while (iterator.entity) |entity| : (iterator.advance()) {
-            if (entity.hasFlag(EntityFlags.Active.toInt())) {
-                drawGroundCover(entity, render_group);
-            }
-        }
-    }
-    TimedBlock.endBlock(@src(), .DrawGroundCover);
-
     DebugInterface.debugBeginDataBlock(@src(), "Lighting");
     {
-        DebugInterface.debugValue(@src(), &light_probe_count, "LightProbeCount");
+        DebugInterface.debugValue(@src(), &opt_render_group.?.commands.light_probe_count, "LightProbeCount");
     }
     DebugInterface.debugEndDataBlock(@src());
 }
@@ -888,6 +881,10 @@ pub fn fillUnpackedEntity(entity: *Entity, sim_region: *SimRegion, assets: *Asse
     _ = sim_region;
 
     var cover_series: random.Series = .seedOffset(entity.id.value);
+
+    if (entity.light_probe_index != 0) {
+        entity.light_probe_clear = true;
+    }
 
     var cover_index: u32 = 0;
     var cover_spec_index: u32 = 0;

@@ -273,25 +273,3 @@ pub fn pushCubeLight(
         null,
     );
 }
-
-pub fn pushLighting(
-    group: *RenderGroup,
-    temp_arena: *MemoryArena,
-    lighting_bounds: Rectangle3,
-) *LightingTextures {
-    std.debug.assert(group.light_box_count == 0);
-
-    var source: *LightingTextures = temp_arena.pushStruct(LightingTextures, null, @src());
-
-    group.lighting_enabled = true;
-    group.light_bounds = lighting_bounds;
-    group.light_boxes = temp_arena.pushArray(MAX_LIGHT_BOX_COUNT, LightingBox, null, @src());
-    group.light_point_index = 1;
-
-    if (group.pushRenderElement(RenderEntryLightingTransfer)) |dest| {
-        dest.light_data0 = &source.light_data0;
-        dest.light_data1 = &source.light_data1;
-    }
-
-    return source;
-}

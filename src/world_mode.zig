@@ -123,7 +123,6 @@ pub const GameModeWorld = struct {
     camera_dolly: f32,
 
     updating_lighting: bool,
-    show_lighting: bool,
     lighting_pattern: u32,
     test_lighting: LightingSolution,
 
@@ -173,7 +172,7 @@ pub const PairwiseCollisionRule = extern struct {
     next_in_hash: ?*PairwiseCollisionRule,
 };
 
-pub fn playWorld(state: *State) void {
+pub fn playWorld(state: *State, max_light_probe_count: u32) void {
     state.setGameMode(.World);
 
     var world_mode: *GameModeWorld = state.mode_arena.pushStruct(
@@ -201,7 +200,7 @@ pub fn playWorld(state: *State) void {
     // const pixels_to_meters = 1.0 / 42.0;
     const chunk_dimension_in_meters = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
 
-    world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
+    world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena, max_light_probe_count);
     state.mode = .{ .world = world_mode };
 
     world_gen.createWorld(world_mode, state.assets);
@@ -602,10 +601,12 @@ pub fn updateAndRenderWorld(
     _ = light_bounds.min.setY(light_bounds.min.y() + 2);
     _ = light_bounds.max.setY(light_bounds.max.y() + 2);
 
-    var light_textures: ?*LightingTextures = null;
-    if (world_mode.updating_lighting) {
-        light_textures = asset_rendering.pushLighting(&render_group, state.frame_arena, light_bounds);
-    }
+    lighting.beginLightingComputation(
+        &world_mode.test_lighting,
+        &render_group,
+        light_bounds,
+        world_mode.updating_lighting,
+    );
 
     if (false) {
         var sim_work: [16]WorldSimWork = undefined;
@@ -772,26 +773,9 @@ pub fn updateAndRenderWorld(
         }
     }
 
-    if (world_mode.updating_lighting) {
-        lighting.lightingTest(&render_group, &world_mode.test_lighting, state.high_priority_queue);
-        if (!world_mode.show_lighting) {
-            lighting.outputLightingTextures(&render_group, &world_mode.test_lighting, light_textures.?);
-        }
-    }
+    lighting.endLightingComputation(&world_mode.test_lighting, &render_group, state.high_priority_queue);
 
     render_group.end();
-
-    if (world_mode.updating_lighting and world_mode.show_lighting) {
-        render_group = RenderGroup.begin(
-            state.assets,
-            render_commands,
-            @backingInt(RenderGroupFlags.ClearColor) | @backingInt(RenderGroupFlags.ClearDepth),
-            .new(0.5, 0.5, 0.5, 0),
-        );
-
-        lighting.outputLightingPoints(&render_group, &world_mode.test_lighting, light_textures.?);
-        render_group.end();
-    }
 
     endSim(state.frame_arena, &world_sim);
 
