@@ -401,7 +401,8 @@ pub const OpenGL = extern struct {
     final_stretch: OpenGLProgramCommon = undefined,
     resolve_multisample: ResolveMultisampleProgram = undefined,
 
-    light_probe_irradiance: [6 * MAX_LIGHT_PROBE_COUNT]Color3 = undefined,
+    light_probe_irradiance: [MAX_LIGHT_PROBE_COUNT]renderer.LightProbeIrradiance = undefined,
+    light_probe_position: [MAX_LIGHT_PROBE_COUNT]Vector3 = undefined,
     light_index_voxel: [LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION]u16 = undefined,
     light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
 
@@ -694,7 +695,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
             @as(i32, @intCast(@intFromBool(depth_peel))),
-            @as(u32, @intCast(@intFromBool(true))), //@as(u32, @intCast(@intFromBool(lighting_disabled))),
+            // @as(u32, @intCast(@intFromBool(lighting_disabled))),
+            @as(i32, 1),
         },
     );
     const vertex_code =
@@ -790,8 +792,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\uniform float ClipAlphaEndDistance;
         \\uniform vec3 CameraPosition;
         \\
-        \\uniform sampler1D Light0Sampler;
-        \\uniform sampler1D Light1Sampler;
+        \\uniform sampler2D LightSampler;
+        \\uniform sampler3D LightIndexSampler;
         \\
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
@@ -805,49 +807,49 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\#if LIGHTING_DISABLED
         \\#else
-        \\vec4 RunningSum;
-        \\void FetchAndSum(int LightIndex)
-        \\{
-        \\  vec4 LightData0 = texelFetch(Light0Sampler, LightIndex, 0);
-        \\  vec4 LightData1 = texelFetch(Light1Sampler, LightIndex, 0);
-        \\
-        \\  vec3 LightPosition = LightData0.xyz;
-        \\  vec3 LightColor = LightData1.rgb;
-        \\  vec3 LightDirection;
-        \\  LightDirection.x = LightData0.a;
-        \\  LightDirection.y = LightData1.a;
-        \\  LightDirection.z =
-        \\    sqrt(1.0f - (LightDirection.x * LightDirection.x + LightDirection.y * LightDirection.y));
-        \\  if (LightColor.r < 0.0)
-        \\  {
-        \\    LightColor.r = -LightColor.r;
-        \\    LightDirection.z = -LightDirection.z;
-        \\  }
-        \\
-        \\  float Contribution = 1.0f / (1.0f + LengthSq(LightPosition - WorldPosition));
-        \\  float DirectionalFalloff = clamp(dot(LightDirection.rgb, WorldNormal), 0.0, 1.0);
-        \\
-        \\  RunningSum.rgb += Contribution * DirectionalFalloff * LightColor.rgb;
-        \\  RunningSum.a += Contribution;
-        \\}
         \\
         \\vec3 SumLight()
         \\{
-        \\  RunningSum = vec4(0.0, 0.0, 0.0, 0.0);
+        \\  vec3 VoxelRelativePosition = WorldPosition - VoxelMinCorner;
+        \\  vec3 VoxelIndexPosition = InverseVoxelCellDimension * VoxelRelativePosition;
         \\
-        \\  FetchAndSum(FragLightIndex + 0);
-        \\  FetchAndSum(FragLightIndex + 1);
-        \\  FetchAndSum(FragLightIndex + 2);
-        \\  FetchAndSum(FragLightIndex + 3);
+        \\  int VoxX = int(floor(VoxelIndexPosition.x));
+        \\  int VoxY = int(floor(VoxelIndexPosition.y));
+        \\  int VoxZ = int(floor(VoxelIndexPosition.z));
         \\
-        \\  vec4 Result = RunningSum;
+        \\  float tX = fract(VoxelIndexPosition.x);
+        \\  float tY = fract(VoxelIndexPosition.y);
+        \\  float tZ = fract(VoxelIndexPosition.z);
         \\
-        \\  if (Result.a > 0.0f)
-        \\  {
-        \\    Result.rgb *= 1.0f / Result.a;
-        \\  }
+        \\  int LightIndex000 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 0, VoxZ + 0), 0);
+        \\  int LightIndex001 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 0, VoxZ + 0), 0);
+        \\  int LightIndex010 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 1, VoxZ + 0), 0);
+        \\  int LightIndex011 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 1, VoxZ + 0), 0);
+        \\  int LightIndex100 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 0, VoxZ + 1), 0);
+        \\  int LightIndex101 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 0, VoxZ + 1), 0);
+        \\  int LightIndex110 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 1, VoxZ + 1), 0);
+        \\  int LightIndex111 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 1, VoxZ + 0), 0);
         \\
-        \\  return(Result.rgb);
+        \\  vec4 LightData000 = texelFetch(LightSampler, LightIndex000, SideIndex, 0);
+        \\  vec4 LightData001 = texelFetch(LightSampler, LightIndex001, SideIndex, 0);
+        \\  vec4 LightData010 = texelFetch(LightSampler, LightIndex010, SideIndex, 0);
+        \\  vec4 LightData011 = texelFetch(LightSampler, LightIndex011, SideIndex, 0);
+        \\  vec4 LightData100 = texelFetch(LightSampler, LightIndex100, SideIndex, 0);
+        \\  vec4 LightData101 = texelFetch(LightSampler, LightIndex101, SideIndex, 0);
+        \\  vec4 LightData110 = texelFetch(LightSampler, LightIndex110, SideIndex, 0);
+        \\  vec4 LightData111 = texelFetch(LightSampler, LightIndex111, SideIndex, 0);
+        \\
+        \\  vec4 LightData00 = mix(LightData000, LightData001, tX);
+        \\  vec4 LightData01 = mix(LightData010, LightData011, tX);
+        \\  vec4 LightData10 = mix(LightData100, LightData101, tX);
+        \\  vec4 LightData11 = mix(LightData110, LightData111, tX);
+        \\
+        \\  vec4 LightData0 = mix(LightData00, LightData01, tY);
+        \\  vec4 LightData1 = mix(LightData10, LightData11, tY);
+        \\
+        \\  vec4 LightData = mix(LightData0, LightData1, tZ);
+        \\
+        \\  return(LightData.rgb);
         \\}
         \\#endif
         \\
@@ -876,11 +878,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\#if LIGHTING_DISABLED
         \\#else
-        \\    if (FragLightIndex != 0)
-        \\    {
-        \\      vec3 L = SumLight();
-        \\      SurfaceReflection *= L;
-        \\    }
+        \\    vec3 L = SumLight();
+        \\    SurfaceReflection *= L;
         \\#endif
         \\
         \\    SurfaceReflection.rgb = mix(SurfaceReflection.rgb, FogColor.rgb * ModColor.a, FogAmount);
@@ -1893,6 +1892,7 @@ pub fn beginFrame(
     commands.max_light_probe_count = MAX_LIGHT_PROBE_COUNT;
     commands.light_probe_count = 0;
     commands.light_probe_irradiance = &open_gl.light_probe_irradiance;
+    commands.light_probe_position = &open_gl.light_probe_position;
 
     commands.light_index_voxel_dimension = LIGHT_INDEX_VOXEL_DIMENSION;
     commands.light_index_voxel = &open_gl.light_index_voxel;

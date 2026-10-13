@@ -538,6 +538,7 @@ pub fn ensureRegionIsUnpacked(
             }
 
             if (removed_from_unpacked) {
+                std.debug.assert(entity.light_probe_index == 0);
                 world.unpacked_entity_count -= 1;
                 entity.* = world.unpacked_entities[world.unpacked_entity_count];
             } else {
@@ -577,6 +578,11 @@ pub fn ensureRegionIsUnpacked(
                         while (at < block.entity_data_size) {
                             const dest: *Entity = acquireUnpackedEntitySlot(world);
                             _ = shared.copy(packed_entity_size, &block.entity_data[at], dest);
+                            memory.zeroSize(
+                                @sizeOf(Entity) - packed_entity_size,
+                                @ptrFromInt(@intFromPtr(dest) + packed_entity_size),
+                            );
+
                             at += packed_entity_size;
 
                             dest.position = dest.position.plus(chunk_delta);

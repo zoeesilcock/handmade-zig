@@ -773,20 +773,31 @@ pub fn updateAndRenderEntities(
 
                     if (entity.light_probe_index != 0) {
                         std.debug.assert(sim.isLightProbe(entity));
+
+                        // The light probe clear is necessary, rather than doing a positional delta, because we cannot
+                        // guarantee that the local coordinate position (which is the on that is tracked by the
+                        // lighting system) is actually going to be different when we move things around, it could
+                        // just  happen to be in the same relative position to the sim region center on twop subsequent
+                        // frames even though it has been assigned to a totally different entity on the second frame.
+                        render_group.setLightProbePosition(
+                            entity.light_probe_index,
+                            entity.position,
+                            entity.light_probe_clear,
+                        );
+                        entity.light_probe_clear = false;
+
                         if (global_config.Lighting_ShowProbes) {
+                            var color: Color = .new(1, 1, 1, 1);
+                            color = handmade.getDebugColor4(entity.light_probe_index, null);
                             render_group.pushCube(
                                 render_group.white_texture,
                                 entity.position,
                                 .splat(0.04),
-                                .new(1, 1, 1, 1),
+                                color,
                                 null,
                                 null,
                                 0,
                             );
-                        }
-
-                        if (entity.light_probe_clear) {
-                            // TODO; Clear the light probe table for this entry so we don't get residual lighting leaks.
                         }
                     }
                 }

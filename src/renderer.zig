@@ -241,6 +241,10 @@ pub const LightingBox = extern struct {
     first_child_index: u16,
 };
 
+pub const LightProbeIrradiance = extern struct {
+    light: [6]Color3,
+};
+
 pub const RenderCommands = extern struct {
     settings: RenderSettings = .{},
 
@@ -264,8 +268,9 @@ pub const RenderCommands = extern struct {
 
     max_light_probe_count: u32,
     light_probe_count: u32,
+    light_probe_position: [*]Vector3, // [max_light_probe_count]
     // TODO: Encode light_probe_irradiance as u32s.
-    light_probe_irradiance: [*]Color3, // [max_light_probe_count][6]
+    light_probe_irradiance: [*]LightProbeIrradiance, // [max_light_probe_count]
 
     light_index_voxel_dimension: u32,
     light_index_voxel: [*]u16, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
@@ -533,6 +538,24 @@ pub const RenderGroup = extern struct {
     pub fn enableLighting(self: *RenderGroup, light_bounds: Rectangle3) void {
         self.lighting_enabled = true;
         self.light_bounds = light_bounds;
+    }
+
+    pub fn setLightProbePosition(self: *RenderGroup, light_probe_index: u32, position: Vector3, clear: bool) void {
+        const commands: *RenderCommands = self.commands;
+
+        if (light_probe_index < commands.max_light_probe_count) {
+            if (commands.light_probe_count < (light_probe_index + 1)) {
+                commands.light_probe_count = (light_probe_index + 1);
+            }
+
+            commands.light_probe_position[light_probe_index] = position;
+
+            if (clear) {
+                memory.zeroStruct(LightProbeIrradiance, &commands.light_probe_irradiance[light_probe_index]);
+            }
+        } else {
+            @panic("Out of light probe slots");
+        }
     }
 
     pub fn allResourcesPresent(self: *RenderGroup) bool {
