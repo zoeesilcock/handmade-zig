@@ -48,6 +48,7 @@ pub const LIGHT_DATA_WIDTH = 2 * 8192;
 pub const MAX_LIGHT_BOX_COUNT = 2 * 8192;
 pub const LIGHT_LOOKUP_VOXEL_DIM = 128;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
+pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
 const SLOW = shared.SLOW;
 
 const LightProbe = extern struct {
@@ -1063,6 +1064,31 @@ pub fn endLightingComputation(
 
             // dest.light_data0[point.pack_index] = .new(position.x(), position.y(), position.z(), direction.x());
             // dest.light_data1[point.pack_index] = .new(color.r(), color.g(), color.b(), direction.y());
+        }
+    }
+
+    const commands: *RenderCommands = group.commands;
+    const voxel_dimension: u32 = commands.light_index_voxel_dimension;
+    const west: u32 = @backingInt(box_mod.BoxSurfaceIndex.West);
+    var z: u32 = 0;
+    while (z < voxel_dimension) : (z += 1) {
+        var y: u32 = 0;
+        while (y < voxel_dimension) : (y += 1) {
+            var x: u32 = 0;
+            while (x < voxel_dimension) : (x += 1) {
+                var light_info: u32 = 0x10000000;
+                if (@mod(x, 2) != 0) {
+                    light_info |= 0x00ff0000;
+                }
+                if (@mod(y, 2) != 0) {
+                    light_info |= 0x0000ff00;
+                }
+                if (@mod(z, 2) != 0) {
+                    light_info |= 0x000000ff;
+                }
+                commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                    light_info;
+            }
         }
     }
 }

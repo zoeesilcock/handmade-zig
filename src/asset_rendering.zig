@@ -17,7 +17,6 @@ const Color3 = math.Color3;
 const Rectangle3 = math.Rectangle3;
 const RenderGroup = renderer.RenderGroup;
 const RendererTexture = renderer.RendererTexture;
-const RenderEntryLightingTransfer = renderer.RenderEntryLightingTransfer;
 const LoadedFont = asset.LoadedFont;
 const LightingTextures = lighting.LightingTextures;
 const LightingBox = renderer.LightingBox;

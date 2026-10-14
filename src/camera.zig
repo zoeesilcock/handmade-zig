@@ -69,6 +69,8 @@ pub const Camera = struct {
             self.far_clip_plane,
             &fog,
             &alpha_clip,
+            null,
+            null,
         );
     }
 };

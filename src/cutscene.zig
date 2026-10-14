@@ -305,6 +305,8 @@ pub fn updateAndRenderTitleScreen(
                 1000,
                 null,
                 null,
+                null,
+                null,
             );
 
             var match_vector = asset.AssetVector{};
@@ -442,6 +444,8 @@ fn renderLayeredScene(
             0,
             0.1,
             1000,
+            null,
+            null,
             null,
             null,
         );

@@ -273,7 +273,7 @@ pub const RenderCommands = extern struct {
     light_probe_irradiance: [*]LightProbeIrradiance, // [max_light_probe_count]
 
     light_index_voxel_dimension: u32,
-    light_index_voxel: [*]u16, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
+    light_index_voxel: [6][*]u32, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
 
     max_light_occluder_count: u32,
     light_occluder_count: u32,
@@ -302,7 +302,6 @@ pub const RenderEntryType = enum(u16) {
     RenderEntryDepthClear,
     RenderEntryBeginPeels,
     RenderEntryEndPeels,
-    RenderEntryLightingTransfer,
 };
 
 pub const RenderEntryHeader = extern struct {
@@ -328,11 +327,6 @@ pub const RenderEntryTexturedQuads = extern struct {
     quad_textures: ?[*]RendererTexture align(1),
 };
 
-pub const RenderEntryLightingTransfer = extern struct {
-    light_data0: [*]Vector4 align(1),
-    light_data1: [*]Vector4 align(1),
-};
-
 pub const RenderSetup = extern struct {
     clip_rect: Rectangle2 align(1) = .zero(),
     render_target_index: u32 align(1) = 0,
@@ -344,6 +338,8 @@ pub const RenderSetup = extern struct {
     fog_end_distance: f32 align(1) = 0,
     clip_alpha_start_distance: f32 align(1) = 0,
     clip_alpha_end_distance: f32 align(1) = 0,
+    voxel_min_corner: Vector3 align(1) = .zero(),
+    voxel_inverse_total_dimension: Vector3 align(1) = .zero(),
 };
 
 pub const FogParams = struct {
@@ -1450,6 +1446,13 @@ pub const RenderGroup = extern struct {
         );
     }
 
+    pub fn setLightBounds(self: *RenderGroup, voxel_min_corner: Vector3, voxel_inverse_total_dimension: Vector3) void {
+        var new_setup: RenderSetup = self.last_setup;
+        new_setup.voxel_min_corner = voxel_min_corner;
+        new_setup.voxel_inverse_total_dimension = voxel_inverse_total_dimension;
+        self.pushSetup(&new_setup);
+    }
+
     pub fn setCameraTransform(
         self: *RenderGroup,
         focal_length: f32,
@@ -1462,6 +1465,8 @@ pub const RenderGroup = extern struct {
         opt_far_clip_plane: ?f32,
         opt_fog_params: ?*FogParams,
         opt_alpha_clip_params: ?*AlphaClipParams,
+        opt_voxel_min_corner: ?Vector3,
+        opt_voxel_inverse_total_dimension: ?Vector3,
     ) void {
         const near_clip_plane: f32 = opt_near_clip_plane orelse 0.1;
         const far_clip_plane: f32 = opt_far_clip_plane orelse 100;
@@ -1469,6 +1474,8 @@ pub const RenderGroup = extern struct {
         const alpha_clip_params: *const AlphaClipParams = opt_alpha_clip_params orelse &.default;
         const is_ortho: bool = (flags & @backingInt(CameraTransformFlag.IsOrthographic)) != 0;
         const is_debug: bool = (flags & @backingInt(CameraTransformFlag.IsDebug)) != 0;
+        const voxel_min_corner: Vector3 = opt_voxel_min_corner orelse .zero();
+        const voxel_inverse_total_dimension: Vector3 = opt_voxel_inverse_total_dimension orelse .zero();
 
         const b: f32 = math.safeRatio1(
             @floatFromInt(self.commands.settings.render_dim.width()),
@@ -1489,6 +1496,8 @@ pub const RenderGroup = extern struct {
         new_setup.fog_end_distance = fog_params.end_distance;
         new_setup.clip_alpha_start_distance = alpha_clip_params.delta_start_distance;
         new_setup.clip_alpha_end_distance = alpha_clip_params.delta_end_distance;
+        new_setup.voxel_min_corner = voxel_min_corner;
+        new_setup.voxel_inverse_total_dimension = voxel_inverse_total_dimension;
 
         render_transform.x = camera_x;
         render_transform.y = camera_y;

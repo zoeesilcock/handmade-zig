@@ -167,6 +167,7 @@ pub const GL_MAX_COLOR_ATTACHMENTS = 0x8CDF;
 pub const GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS = 0x8B4D;
 pub const GL_TEXTURE_MIN_LOD = 0x813A;
 pub const GL_TEXTURE_MAX_LOD = 0x813B;
+pub const GL_TEXTURE_WRAP_R = 0x8072;
 
 const ALL_COLOR_ATTACHMENTS = [_]u32{
     GL_COLOR_ATTACHMENT0,
@@ -224,10 +225,11 @@ const RenderSetup = renderer.RenderSetup;
 const TextureQueue = renderer.TextureQueue;
 const RenderEntryHeader = renderer.RenderEntryHeader;
 const RenderEntryTexturedQuads = renderer.RenderEntryTexturedQuads;
-const RenderEntryLightingTransfer = renderer.RenderEntryLightingTransfer;
 const RenderEntryBeginPeels = renderer.RenderEntryBeginPeels;
 const RenderEntryFullClear = renderer.RenderEntryFullClear;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
+const MAX_LIGHT_INTENSITY = lighting.MAX_LIGHT_INTENSITY;
+const LIGHT_LOOKUP_VOXEL_DIM = lighting.LIGHT_LOOKUP_VOXEL_DIM;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -300,6 +302,8 @@ const ZBiasProgram = extern struct {
     clip_alpha_start_distance_id: i32 = 0,
     clip_alpha_end_distance_id: i32 = 0,
     alpha_threshold_id: i32 = 0,
+    voxel_min_corner_id: i32 = 0,
+    voxel_inverse_total_dimension_id: i32 = 0,
 };
 
 const ResolveMultisampleProgram = extern struct {
@@ -403,11 +407,9 @@ pub const OpenGL = extern struct {
 
     light_probe_irradiance: [MAX_LIGHT_PROBE_COUNT]renderer.LightProbeIrradiance = undefined,
     light_probe_position: [MAX_LIGHT_PROBE_COUNT]Vector3 = undefined,
-    light_index_voxel: [LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION]u16 = undefined,
+    light_data: [6][LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION]u32 = undefined,
     light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
-
-    light_data0: u32 = 0,
-    light_data1: u32 = 0,
+    light_data_handle: [6]u32 = @splat(0),
 
     // light_buffer_count: u32 = 0,
     // light_buffers: [12]LightBuffer = undefined,
@@ -635,12 +637,30 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
+    gl.glGenTextures(open_gl.light_data.len, @ptrCast(&open_gl.light_data_handle));
+    var voxel_index: u32 = 0;
+    while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
+        const handle: u32 = open_gl.light_data_handle[voxel_index];
+        gl.glBindTexture(GL_TEXTURE_3D, handle);
+        platform.optGLTexImage3D.?(
+            GL_TEXTURE_3D,
+            0,
+            GL.GL_RGBA8,
+            LIGHT_LOOKUP_VOXEL_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM,
+            0,
+            GL.GL_BGRA_EXT,
+            GL.GL_UNSIGNED_BYTE,
+            null,
+        );
+    }
+
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
 }
 
 const shader_header_code =
     \\// Header code
-    \\#define MaxLightIntensity 10
     \\#define LengthSq(a) dot(a, a)
     \\
     \\float clamp01MapToRange(float min, float max, float value) {
@@ -679,7 +699,6 @@ const shader_header_code =
 ;
 
 fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: bool, lighting_disabled: bool) void {
-    _ = lighting_disabled;
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -690,13 +709,15 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\#define ShaderSimTexWriteSRGB %d
         \\#define DepthPeel %d
         \\#define LIGHTING_DISABLED %d
+        \\#define MAX_LIGHT_INTENSITY %f
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
             @as(i32, @intCast(@intFromBool(depth_peel))),
-            // @as(u32, @intCast(@intFromBool(lighting_disabled))),
-            @as(i32, 1),
+            @as(u32, @intCast(@intFromBool(lighting_disabled))),
+            // @as(i32, 1),
+            MAX_LIGHT_INTENSITY,
         },
     );
     const vertex_code =
@@ -792,8 +813,15 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\uniform float ClipAlphaEndDistance;
         \\uniform vec3 CameraPosition;
         \\
-        \\uniform sampler2D LightSampler;
-        \\uniform sampler3D LightIndexSampler;
+        \\uniform vec3 VoxelMinCorner;
+        \\uniform vec3 VoxelInverseTotalDimension;
+        \\
+        \\uniform sampler3D LightSamplerWest;
+        \\uniform sampler3D LightSamplerEast;
+        \\uniform sampler3D LightSamplerSouth;
+        \\uniform sampler3D LightSamplerNorth;
+        \\uniform sampler3D LightSamplerDown;
+        \\uniform sampler3D LightSamplerUp;
         \\
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
@@ -805,53 +833,24 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\out vec4 BlendUnitColor;
         \\
-        \\#if LIGHTING_DISABLED
-        \\#else
-        \\
         \\vec3 SumLight()
         \\{
         \\  vec3 VoxelRelativePosition = WorldPosition - VoxelMinCorner;
-        \\  vec3 VoxelIndexPosition = InverseVoxelCellDimension * VoxelRelativePosition;
+        \\  vec3 VoxelUVW = VoxelInverseTotalDimension * VoxelRelativePosition;
         \\
-        \\  int VoxX = int(floor(VoxelIndexPosition.x));
-        \\  int VoxY = int(floor(VoxelIndexPosition.y));
-        \\  int VoxZ = int(floor(VoxelIndexPosition.z));
+        \\  vec4 LightWest = texture(LightSamplerWest, VoxelUVW);
+        \\  vec4 LightEast = texture(LightSamplerEast, VoxelUVW);
+        \\  vec4 LightSouth = texture(LightSamplerSouth, VoxelUVW);
+        \\  vec4 LightNorth = texture(LightSamplerNorth, VoxelUVW);
+        \\  vec4 LightDown = texture(LightSamplerDown, VoxelUVW);
+        \\  vec4 LightUp = texture(LightSamplerUp, VoxelUVW);
         \\
-        \\  float tX = fract(VoxelIndexPosition.x);
-        \\  float tY = fract(VoxelIndexPosition.y);
-        \\  float tZ = fract(VoxelIndexPosition.z);
+        \\  // TODO: Insert lighting equation here!
         \\
-        \\  int LightIndex000 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 0, VoxZ + 0), 0);
-        \\  int LightIndex001 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 0, VoxZ + 0), 0);
-        \\  int LightIndex010 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 1, VoxZ + 0), 0);
-        \\  int LightIndex011 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 1, VoxZ + 0), 0);
-        \\  int LightIndex100 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 0, VoxZ + 1), 0);
-        \\  int LightIndex101 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 0, VoxZ + 1), 0);
-        \\  int LightIndex110 = texelFetch(LightIndexSampler, ivec3(VoxX + 0, VoxY + 1, VoxZ + 1), 0);
-        \\  int LightIndex111 = texelFetch(LightIndexSampler, ivec3(VoxX + 1, VoxY + 1, VoxZ + 0), 0);
-        \\
-        \\  vec4 LightData000 = texelFetch(LightSampler, LightIndex000, SideIndex, 0);
-        \\  vec4 LightData001 = texelFetch(LightSampler, LightIndex001, SideIndex, 0);
-        \\  vec4 LightData010 = texelFetch(LightSampler, LightIndex010, SideIndex, 0);
-        \\  vec4 LightData011 = texelFetch(LightSampler, LightIndex011, SideIndex, 0);
-        \\  vec4 LightData100 = texelFetch(LightSampler, LightIndex100, SideIndex, 0);
-        \\  vec4 LightData101 = texelFetch(LightSampler, LightIndex101, SideIndex, 0);
-        \\  vec4 LightData110 = texelFetch(LightSampler, LightIndex110, SideIndex, 0);
-        \\  vec4 LightData111 = texelFetch(LightSampler, LightIndex111, SideIndex, 0);
-        \\
-        \\  vec4 LightData00 = mix(LightData000, LightData001, tX);
-        \\  vec4 LightData01 = mix(LightData010, LightData011, tX);
-        \\  vec4 LightData10 = mix(LightData100, LightData101, tX);
-        \\  vec4 LightData11 = mix(LightData110, LightData111, tX);
-        \\
-        \\  vec4 LightData0 = mix(LightData00, LightData01, tY);
-        \\  vec4 LightData1 = mix(LightData10, LightData11, tY);
-        \\
-        \\  vec4 LightData = mix(LightData0, LightData1, tZ);
+        \\  vec3 LightData = LightWest.rgb * (MAX_LIGHT_INTENSITY * LightWest.a);
         \\
         \\  return(LightData.rgb);
         \\}
-        \\#endif
         \\
         \\void main(void)
         \\{
@@ -913,8 +912,12 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         &.{
             "TextureSampler",
             "DepthSampler",
-            "Light0Sampler",
-            "Light1Sampler",
+            "LightSamplerWest",
+            "LightSamplerEast",
+            "LightSamplerSouth",
+            "LightSamplerNorth",
+            "LightSamplerDown",
+            "LightSamplerUp",
         },
     );
 
@@ -928,6 +931,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
     program.clip_alpha_start_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaStartDistance");
     program.clip_alpha_end_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaEndDistance");
     program.alpha_threshold_id = platform.optGLGetUniformLocation.?(program_handle, "AlphaThreshold");
+    program.voxel_min_corner_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelMinCorner");
+    program.voxel_inverse_total_dimension_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelInverseTotalDimension");
 }
 
 fn compilePeelCompositeProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
@@ -1239,6 +1244,8 @@ fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *align(1) RenderSetup, al
     platform.optGLUniform1f.?(program.clip_alpha_start_distance_id, setup.clip_alpha_start_distance);
     platform.optGLUniform1f.?(program.clip_alpha_end_distance_id, setup.clip_alpha_end_distance);
     platform.optGLUniform1f.?(program.alpha_threshold_id, alpha_threshold);
+    platform.optGLUniform3fv.?(program.voxel_min_corner_id, 1, setup.voxel_min_corner.toGL());
+    platform.optGLUniform3fv.?(program.voxel_inverse_total_dimension_id, 1, setup.voxel_inverse_total_dimension.toGL());
 }
 
 fn useResolveMultisampleProgramBegin(open_gl: *OpenGL, program: *ResolveMultisampleProgram) void {
@@ -1524,9 +1531,6 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     freeProgram(&open_gl.final_stretch);
     freeProgram(&open_gl.resolve_multisample.common);
 
-    gl.glDeleteTextures(1, &open_gl.light_data0);
-    gl.glDeleteTextures(1, &open_gl.light_data1);
-
     // Create new dynamic resources.
     open_gl.current_settings = settings.*;
     var resolve_flags: u32 = 0;
@@ -1692,22 +1696,6 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //         texture_height = 1;
     //     }
     // }
-
-    gl.glGenTextures(1, &open_gl.light_data0);
-    gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data0);
-    gl.glTexImage1D(GL.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, GL.GL_RGBA, GL.GL_FLOAT, null);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    gl.glGenTextures(1, &open_gl.light_data1);
-    gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data1);
-    gl.glTexImage1D(GL.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, GL.GL_RGBA, GL.GL_FLOAT, null);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(GL.GL_TEXTURE_1D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
     var min_filter: i32 = GL.GL_LINEAR_MIPMAP_NEAREST;
@@ -1895,7 +1883,12 @@ pub fn beginFrame(
     commands.light_probe_position = &open_gl.light_probe_position;
 
     commands.light_index_voxel_dimension = LIGHT_INDEX_VOXEL_DIMENSION;
-    commands.light_index_voxel = &open_gl.light_index_voxel;
+    commands.light_index_voxel[0] = &open_gl.light_data[0];
+    commands.light_index_voxel[1] = &open_gl.light_data[1];
+    commands.light_index_voxel[2] = &open_gl.light_data[2];
+    commands.light_index_voxel[3] = &open_gl.light_data[3];
+    commands.light_index_voxel[4] = &open_gl.light_data[4];
+    commands.light_index_voxel[5] = &open_gl.light_data[5];
 
     commands.max_light_occluder_count = MAX_LIGHT_OCCLUDER_COUNT;
     commands.light_occluder_count = 0;
@@ -1944,6 +1937,32 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         GL_STREAM_DRAW,
     );
 
+    {
+        var voxel_index: u32 = 0;
+        while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
+            gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle[voxel_index]);
+            platform.optGLTexSubImage3D.?(
+                GL_TEXTURE_3D,
+                0,
+                0,
+                0,
+                0,
+                LIGHT_LOOKUP_VOXEL_DIM,
+                LIGHT_LOOKUP_VOXEL_DIM,
+                LIGHT_LOOKUP_VOXEL_DIM,
+                GL.GL_BGRA_EXT,
+                GL.GL_UNSIGNED_BYTE,
+                &open_gl.light_data[voxel_index],
+            );
+            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
+            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
+            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+        }
+        gl.glBindTexture(GL_TEXTURE_3D, 0);
+    }
+
     const settings: *RenderSettings = &commands.settings;
     if (!settings.equals(&open_gl.current_settings)) {
         changeToSettings(open_gl, settings);
@@ -1975,7 +1994,6 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         // //     .RenderEntryFullClear => @alignOf(RenderEntryFullClear),
         // //     .RenderEntryBeginPeels => @alignOf(RenderEntryBeginPeels),
         // //     .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
-        // //     .RenderEntryLightingTransfer => @alignOf(RenderEntryLightingTransfer),
         // //     .RenderEntryDepthClear, .RenderEntryEndPeels => @alignOf(u32),
         // // };
         //
@@ -2099,10 +2117,12 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     }
                 }
 
-                platform.optGLActiveTexture.?(GL_TEXTURE2);
-                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data0);
-                platform.optGLActiveTexture.?(GL_TEXTURE3);
-                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data1);
+                var voxel_index: u32 = 0;
+                while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
+                    platform.optGLActiveTexture.?(GL_TEXTURE2 + voxel_index);
+                    gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle[voxel_index]);
+                }
+
                 platform.optGLActiveTexture.?(GL_TEXTURE0);
 
                 useZBiasProgramBegin(program, setup, alpha_threshold);
@@ -2144,16 +2164,6 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
                     platform.optGLActiveTexture.?(GL_TEXTURE0);
                 }
-            },
-            .RenderEntryLightingTransfer => {
-                const entry: *RenderEntryLightingTransfer = @ptrCast(@alignCast(data));
-                header_at += @sizeOf(RenderEntryLightingTransfer);
-
-                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data0);
-                gl.glTexSubImage1D(GL.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, GL.GL_RGBA, GL.GL_FLOAT, entry.light_data0);
-                gl.glBindTexture(GL.GL_TEXTURE_1D, open_gl.light_data1);
-                gl.glTexSubImage1D(GL.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, GL.GL_RGBA, GL.GL_FLOAT, entry.light_data1);
-                gl.glBindTexture(GL.GL_TEXTURE_1D, 0);
             },
         }
     }

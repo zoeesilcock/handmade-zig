@@ -531,6 +531,8 @@ pub fn updateAndRenderWorld(
         far_clip_plane,
         &fog,
         &alpha_clip,
+        null,
+        null,
     );
 
     if (world_mode.use_debug_camera) {
@@ -571,6 +573,8 @@ pub fn updateAndRenderWorld(
             far_clip_plane,
             null,
             null,
+            null,
+            null,
         );
     }
 
@@ -601,6 +605,8 @@ pub fn updateAndRenderWorld(
     _ = light_bounds.min.setY(light_bounds.min.y() + 2);
     _ = light_bounds.max.setY(light_bounds.max.y() + 2);
 
+    const inverse_light_dimension: Vector3 = light_bounds.getDimension().divideFByMe(1);
+    render_group.setLightBounds(light_bounds.min, inverse_light_dimension);
     lighting.beginLightingComputation(
         &world_mode.test_lighting,
         &render_group,
