@@ -46,9 +46,12 @@ pub const LIGHT_TEST_ACCUMULATION_COUNT = 1024;
 pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
 pub const MAX_LIGHT_BOX_COUNT = 2 * 8192;
-pub const LIGHT_LOOKUP_VOXEL_DIM = 128;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
+pub const LIGHT_LOOKUP_VOXEL_DIM = 32;
+pub const MAX_LIGHT_PROBE_COUNT = 2 * 8192;
+pub const MAX_LIGHT_OCCLUDER_COUNT = 2 * 8192;
 pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
+
 const SLOW = shared.SLOW;
 
 const LightProbe = extern struct {
@@ -839,9 +842,10 @@ pub fn endLightingComputation(
         }
     }
 
-    buildSpatialPartitionForLighting(solution);
+    // buildSpatialPartitionForLighting(solution);
 
-    computeAllLightPropagation(solution, lighting_queue);
+    _ = lighting_queue;
+    // computeAllLightPropagation(solution, lighting_queue);
 
     if (solution.accumulating) {
         if (should_accumulate) {
@@ -1067,27 +1071,66 @@ pub fn endLightingComputation(
         }
     }
 
-    const commands: *RenderCommands = group.commands;
-    const voxel_dimension: u32 = commands.light_index_voxel_dimension;
-    const west: u32 = @backingInt(box_mod.BoxSurfaceIndex.West);
-    var z: u32 = 0;
-    while (z < voxel_dimension) : (z += 1) {
-        var y: u32 = 0;
-        while (y < voxel_dimension) : (y += 1) {
-            var x: u32 = 0;
-            while (x < voxel_dimension) : (x += 1) {
-                var light_info: u32 = 0x10000000;
-                if (@mod(x, 2) != 0) {
-                    light_info |= 0x00ff0000;
+    if (true) {
+        const commands: *RenderCommands = group.commands;
+        const voxel_dimension: u32 = commands.light_index_voxel_dimension;
+        const west: u32 = @backingInt(box_mod.BoxSurfaceIndex.West);
+        const east: u32 = @backingInt(box_mod.BoxSurfaceIndex.East);
+        const south: u32 = @backingInt(box_mod.BoxSurfaceIndex.South);
+        const north: u32 = @backingInt(box_mod.BoxSurfaceIndex.North);
+        const up: u32 = @backingInt(box_mod.BoxSurfaceIndex.Up);
+        const down: u32 = @backingInt(box_mod.BoxSurfaceIndex.Down);
+        var z: u32 = 0;
+        while (z < voxel_dimension) : (z += 1) {
+            var y: u32 = 0;
+            while (y < voxel_dimension) : (y += 1) {
+                var x: u32 = 0;
+                while (x < voxel_dimension) : (x += 1) {
+                    const light_west: u32 = 0x10000000;
+                    const light_east: u32 = 0x10000000;
+                    const light_south: u32 = 0x10000000;
+                    const light_north: u32 = 0x10000000;
+                    var light_down: u32 = 0x10000000;
+                    var light_up: u32 = 0x10000000;
+
+                    light_up |= 0x00ff00ff;
+                    light_down |= 0x00ffff00;
+
+                    if (false) {
+                        if (@mod(x, 2) == 0) {
+                            light_west |= 0x00ff0000;
+                        }
+                        if (@mod(y, 2) == 0) {
+                            light_east |= 0x0000ff00;
+                        }
+                        if (@mod(x, 2) == 0) {
+                            light_down |= 0x000000ff;
+                        }
+
+                        if (x == (voxel_dimension - 1)) {
+                            light_west |= 0x0000ffff;
+                        }
+                        if (y == (voxel_dimension - 1)) {
+                            light_east |= 0x0000ffff;
+                        }
+                        if (z == (voxel_dimension - 1)) {
+                            light_down |= 0x0000ffff;
+                        }
+                    }
+
+                    commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                        light_west;
+                    commands.light_index_voxel[east][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                        light_east;
+                    commands.light_index_voxel[south][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                        light_south;
+                    commands.light_index_voxel[north][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                        light_north;
+                    commands.light_index_voxel[up][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                        light_up;
+                    commands.light_index_voxel[down][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                        light_down;
                 }
-                if (@mod(y, 2) != 0) {
-                    light_info |= 0x0000ff00;
-                }
-                if (@mod(z, 2) != 0) {
-                    light_info |= 0x000000ff;
-                }
-                commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                    light_info;
             }
         }
     }

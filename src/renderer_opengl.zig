@@ -211,9 +211,6 @@ const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 const DEPTH_COMPONENT_BYTES_PER_SAMPLE = 4;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
-const LIGHT_INDEX_VOXEL_DIMENSION = 128;
-const MAX_LIGHT_PROBE_COUNT = 65536;
-const MAX_LIGHT_OCCLUDER_COUNT = 65536;
 
 const PlatformRenderer = renderer.PlatformRenderer;
 const RenderCommands = renderer.RenderCommands;
@@ -230,6 +227,8 @@ const RenderEntryFullClear = renderer.RenderEntryFullClear;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const MAX_LIGHT_INTENSITY = lighting.MAX_LIGHT_INTENSITY;
 const LIGHT_LOOKUP_VOXEL_DIM = lighting.LIGHT_LOOKUP_VOXEL_DIM;
+const MAX_LIGHT_PROBE_COUNT = lighting.MAX_LIGHT_PROBE_COUNT;
+const MAX_LIGHT_OCCLUDER_COUNT = lighting.MAX_LIGHT_OCCLUDER_COUNT;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -407,7 +406,7 @@ pub const OpenGL = extern struct {
 
     light_probe_irradiance: [MAX_LIGHT_PROBE_COUNT]renderer.LightProbeIrradiance = undefined,
     light_probe_position: [MAX_LIGHT_PROBE_COUNT]Vector3 = undefined,
-    light_data: [6][LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION * LIGHT_INDEX_VOXEL_DIMENSION]u32 = undefined,
+    light_data: [6][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]u32 = undefined,
     light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
     light_data_handle: [6]u32 = @splat(0),
 
@@ -654,6 +653,11 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             GL.GL_UNSIGNED_BYTE,
             null,
         );
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     }
 
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
@@ -833,21 +837,40 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\out vec4 BlendUnitColor;
         \\
+        \\vec3 GetIrradiance(vec4 LightV, vec3 LightN, vec3 SampleN)
+        \\{
+        \\  vec3 result = clamp(dot(LightN, SampleN), 0.0, 1.0) * (LightV.rgb * (MAX_LIGHT_INTENSITY * LightV.a));
+        \\  return(result);
+        \\}
+        \\
         \\vec3 SumLight()
         \\{
+        \\  vec3 I = WorldPosition - CameraPosition;
+        \\  vec3 R = normalize(I - 2 * dot(I, WorldNormal) * WorldNormal);
+        \\
         \\  vec3 VoxelRelativePosition = WorldPosition - VoxelMinCorner;
         \\  vec3 VoxelUVW = VoxelInverseTotalDimension * VoxelRelativePosition;
         \\
         \\  vec4 LightWest = texture(LightSamplerWest, VoxelUVW);
+        \\  vec3 LightWestN = vec3(-1, 0, 0);
         \\  vec4 LightEast = texture(LightSamplerEast, VoxelUVW);
+        \\  vec3 LightEastN = vec3(1, 0, 0);
         \\  vec4 LightSouth = texture(LightSamplerSouth, VoxelUVW);
+        \\  vec3 LightSouthN = vec3(0, -1, 0);
         \\  vec4 LightNorth = texture(LightSamplerNorth, VoxelUVW);
+        \\  vec3 LightNorthN = vec3(0, 1, 0);
         \\  vec4 LightDown = texture(LightSamplerDown, VoxelUVW);
+        \\  vec3 LightDownN = vec3(0, 0, -1);
         \\  vec4 LightUp = texture(LightSamplerUp, VoxelUVW);
+        \\  vec3 LightUpN = vec3(0, 0, 1);
         \\
-        \\  // TODO: Insert lighting equation here!
-        \\
-        \\  vec3 LightData = LightWest.rgb * (MAX_LIGHT_INTENSITY * LightWest.a);
+        \\  vec3 LightData = vec3(0, 0, 0);
+        \\  LightData += GetIrradiance(LightWest, LightWestN, R);
+        \\  LightData += GetIrradiance(LightEast, LightEastN, R);
+        \\  LightData += GetIrradiance(LightSouth, LightSouthN, R);
+        \\  LightData += GetIrradiance(LightNorth, LightNorthN, R);
+        \\  LightData += GetIrradiance(LightDown, LightDownN, R);
+        \\  LightData += GetIrradiance(LightUp, LightUpN, R);
         \\
         \\  return(LightData.rgb);
         \\}
@@ -1882,7 +1905,7 @@ pub fn beginFrame(
     commands.light_probe_irradiance = &open_gl.light_probe_irradiance;
     commands.light_probe_position = &open_gl.light_probe_position;
 
-    commands.light_index_voxel_dimension = LIGHT_INDEX_VOXEL_DIMENSION;
+    commands.light_index_voxel_dimension = LIGHT_LOOKUP_VOXEL_DIM;
     commands.light_index_voxel[0] = &open_gl.light_data[0];
     commands.light_index_voxel[1] = &open_gl.light_data[1];
     commands.light_index_voxel[2] = &open_gl.light_data[2];
@@ -1900,6 +1923,8 @@ pub fn beginFrame(
 
     return commands;
 }
+
+var only_first_ten: u32 = 10;
 
 pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     const draw_region: Rectangle2i = commands.os_draw_region;
@@ -1937,7 +1962,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         GL_STREAM_DRAW,
     );
 
-    {
+    platform.optGLActiveTexture.?(GL_TEXTURE0);
+
+    if (only_first_ten > 0) {
         var voxel_index: u32 = 0;
         while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
             gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle[voxel_index]);
@@ -1954,13 +1981,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 GL.GL_UNSIGNED_BYTE,
                 &open_gl.light_data[voxel_index],
             );
-            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
-            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
-            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
         }
         gl.glBindTexture(GL_TEXTURE_3D, 0);
+        only_first_ten -= 0;
     }
 
     const settings: *RenderSettings = &commands.settings;

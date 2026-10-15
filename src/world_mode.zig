@@ -578,7 +578,8 @@ pub fn updateAndRenderWorld(
         );
     }
 
-    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(8);
+    const focus_z: f32 = 0.5 * (world_mode.camera.expected_focus_min_z + world_mode.camera.expected_focus_max_z);
+    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(focus_z);
     const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
         world_camera_rect.max.x() - world_camera_rect.min.x(),
         world_camera_rect.max.y() - world_camera_rect.min.y(),
@@ -601,9 +602,10 @@ pub fn updateAndRenderWorld(
     var light_bounds: Rectangle3 = world_camera_rect;
     _ = light_bounds.min.setZ(sim_bounds.min.z());
     _ = light_bounds.max.setZ(sim_bounds.max.z());
-    light_bounds = light_bounds.addRadius(.new(4, 3, 0));
-    _ = light_bounds.min.setY(light_bounds.min.y() + 2);
-    _ = light_bounds.max.setY(light_bounds.max.y() + 2);
+    // light_bounds = light_bounds.addRadius(.new(4, 3, 0));
+    const adjustment_y: f32 = light_bounds.getDimension().x() - light_bounds.getDimension().y();
+    _ = light_bounds.min.setY(light_bounds.min.y() - 0.5 * adjustment_y);
+    _ = light_bounds.max.setY(light_bounds.max.y() + 0.5 * adjustment_y);
 
     const inverse_light_dimension: Vector3 = light_bounds.getDimension().divideFByMe(1);
     render_group.setLightBounds(light_bounds.min, inverse_light_dimension);
