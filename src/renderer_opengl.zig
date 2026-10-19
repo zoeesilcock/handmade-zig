@@ -653,8 +653,8 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             GL.GL_UNSIGNED_BYTE,
             null,
         );
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
         gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
@@ -837,10 +837,24 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\out vec4 BlendUnitColor;
         \\
-        \\vec3 GetIrradiance(vec4 LightV, vec3 LightN, vec3 SampleN)
+        \\vec3 GetIrradiance(vec4 LightV, vec3 LightNormal, vec3 ReflectionNormal)
         \\{
-        \\  vec3 result = clamp(dot(LightN, SampleN), 0.0, 1.0) * (LightV.rgb * (MAX_LIGHT_INTENSITY * LightV.a));
-        \\  return(result);
+        \\  vec3 Result = vec3(0, 0, 0);
+        \\
+        \\  float SpecularMix = 0.5;
+        \\  float SpecularCoefficient = SpecularMix;
+        \\  float DiffuseCoefficient = 1.0 - SpecularMix;
+        \\
+        \\  float LightDirectionCoefficient = clamp((1.0 / 1.7) * (dot(LightNormal, WorldNormal) + 0.7), 0, 1);
+        \\  if (LightDirectionCoefficient > 0)
+        \\  {
+        \\    float ReflectionCoefficient = clamp(dot(LightNormal, ReflectionNormal), 0.0, 1.0);
+        \\    vec3 LightColor = LightV.rgb * (MAX_LIGHT_INTENSITY * LightV.a);
+        \\    Result = DiffuseCoefficient * LightDirectionCoefficient * LightColor +
+        \\             SpecularCoefficient * ReflectionCoefficient * LightColor;
+        \\  }
+        \\
+        \\  return(Result);
         \\}
         \\
         \\vec3 SumLight()
@@ -1924,8 +1938,6 @@ pub fn beginFrame(
     return commands;
 }
 
-var only_first_ten: u32 = 10;
-
 pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     const draw_region: Rectangle2i = commands.os_draw_region;
     const window_width: i32 = @intCast(commands.os_window_dim.width());
@@ -1964,7 +1976,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
     platform.optGLActiveTexture.?(GL_TEXTURE0);
 
-    if (only_first_ten > 0) {
+    {
         var voxel_index: u32 = 0;
         while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
             gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle[voxel_index]);
@@ -1982,9 +1994,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 &open_gl.light_data[voxel_index],
             );
         }
-        gl.glBindTexture(GL_TEXTURE_3D, 0);
-        only_first_ten -= 0;
     }
+
+    gl.glBindTexture(GL_TEXTURE_3D, 0);
 
     const settings: *RenderSettings = &commands.settings;
     if (!settings.equals(&open_gl.current_settings)) {

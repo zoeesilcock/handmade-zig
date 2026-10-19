@@ -952,7 +952,7 @@ pub fn fillUnpackedEntity(entity: *Entity, sim_region: *SimRegion, assets: *Asse
                 const color: Color3 = .new(1, 1, 1);
                 cover.bitmap = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector);
                 cover.color = renderer.finalizeColor3(color);
-                cover.normal = .new(0, -1, 0); // TODO: Adjust this once lighting is working.
+                cover.normal = .new(0, 0, 1); // TODO: Adjust this once lighting is working.
 
                 const base_position: Vector3 = entity.collision_volume.pointFromUVW(random_uvw);
                 const scale: f32 = 0.3;

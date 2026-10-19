@@ -781,6 +781,7 @@ pub fn updateAndRenderWorld(
         }
     }
 
+    world_mode.test_lighting.debug_light_position = world_mode.debug_light_position;
     lighting.endLightingComputation(&world_mode.test_lighting, &render_group, state.high_priority_queue);
 
     render_group.end();

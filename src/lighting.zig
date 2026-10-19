@@ -28,6 +28,7 @@ const F32_4x = simd.F32_4x;
 const U32_4x = simd.U32_4x;
 const Bool_4x = simd.Bool_4x;
 const RenderGroup = renderer.RenderGroup;
+const RenderSetup = renderer.RenderSetup;
 const RenderCommands = renderer.RenderCommands;
 const RendererTexture = renderer.RendererTexture;
 const LightingBox = renderer.LightingBox;
@@ -174,6 +175,8 @@ pub const LightingSolution = struct {
     light_probe_count: u16,
     spatial_probe_index: LightProbeSpatialIndex,
     light_probes: [*]LightProbe,
+
+    debug_light_position: Vector3,
 
     pub fn addProbeToSpacialIndex(
         self: *LightingSolution,
@@ -1072,29 +1075,67 @@ pub fn endLightingComputation(
     }
 
     if (true) {
+        const light_position: Vector3 = solution.debug_light_position;
+
+        const setup: *RenderSetup = &group.last_setup;
         const commands: *RenderCommands = group.commands;
         const voxel_dimension: u32 = commands.light_index_voxel_dimension;
+        const inverse_voxel_dimension: Vector3 =
+            Vector3.newU(voxel_dimension, voxel_dimension, voxel_dimension).divideFByMe(1);
+
         const west: u32 = @backingInt(box_mod.BoxSurfaceIndex.West);
         const east: u32 = @backingInt(box_mod.BoxSurfaceIndex.East);
         const south: u32 = @backingInt(box_mod.BoxSurfaceIndex.South);
         const north: u32 = @backingInt(box_mod.BoxSurfaceIndex.North);
         const up: u32 = @backingInt(box_mod.BoxSurfaceIndex.Up);
         const down: u32 = @backingInt(box_mod.BoxSurfaceIndex.Down);
+
+        const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
+        const light_uvw: Vector3 =
+            voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
+        const light_radius_coefficient: f32 = 3;
+        const light_intensity: f32 = 0.025 * MAX_LIGHT_INTENSITY;
+
         var z: u32 = 0;
         while (z < voxel_dimension) : (z += 1) {
             var y: u32 = 0;
             while (y < voxel_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < voxel_dimension) : (x += 1) {
-                    const light_west: u32 = 0x10000000;
-                    const light_east: u32 = 0x10000000;
-                    const light_south: u32 = 0x10000000;
-                    const light_north: u32 = 0x10000000;
-                    var light_down: u32 = 0x10000000;
-                    var light_up: u32 = 0x10000000;
+                    const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
+                    const voxel_uvw: Vector3 = inverse_voxel_dimension.hadamardProduct(voxel_center_position);
+                    var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
+                    const light_distance: f32 = light_normal.length();
+                    light_normal = light_uvw.minus(voxel_uvw).normalizeOrZero();
 
-                    light_up |= 0x00ff00ff;
-                    light_down |= 0x00ffff00;
+                    var light_coefficient: f32 = math.clampf01(1.0 - light_radius_coefficient * light_distance);
+                    light_coefficient = light_intensity * light_coefficient;
+
+                    var west_alpha: f32 = math.clampf01(-light_normal.x());
+                    var east_alpha: f32 = math.clampf01(light_normal.x());
+                    var south_alpha: f32 = math.clampf01(-light_normal.y());
+                    var north_alpha: f32 = math.clampf01(light_normal.y());
+                    var down_alpha: f32 = math.clampf01(-light_normal.z());
+                    var up_alpha: f32 = math.clampf01(light_normal.z());
+
+                    const total_alpha: f32 =
+                        west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
+                    const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
+                    west_alpha *= inverse_total_alpha;
+                    east_alpha *= inverse_total_alpha;
+                    south_alpha *= inverse_total_alpha;
+                    north_alpha *= inverse_total_alpha;
+                    down_alpha *= inverse_total_alpha;
+                    up_alpha *= inverse_total_alpha;
+
+                    const light_west: u32 = Color.new(1, 1, 1, west_alpha).scaledTo(255).packColorRGBA();
+                    const light_east: u32 = Color.new(1, 1, 1, east_alpha).scaledTo(255).packColorRGBA();
+
+                    const light_south: u32 = Color.new(1, 1, 1, south_alpha).scaledTo(255).packColorRGBA();
+                    const light_north: u32 = Color.new(1, 1, 1, north_alpha).scaledTo(255).packColorRGBA();
+
+                    const light_down: u32 = Color.new(1, 1, 1, down_alpha).scaledTo(255).packColorRGBA();
+                    const light_up: u32 = Color.new(1, 1, 1, up_alpha).scaledTo(255).packColorRGBA();
 
                     if (false) {
                         if (@mod(x, 2) == 0) {
