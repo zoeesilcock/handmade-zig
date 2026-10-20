@@ -238,7 +238,7 @@ fn Vector3Type(comptime ScalarType: type) type {
             );
         }
 
-        pub fn i32ToF32(self: *Vector3i) Vector3 {
+        pub fn i32ToF32(self: *const Vector3i) Vector3 {
             return .new(
                 @floatFromInt(self.x()),
                 @floatFromInt(self.y()),
@@ -246,11 +246,22 @@ fn Vector3Type(comptime ScalarType: type) type {
             );
         }
 
+        // TODO: This is needed to emulate the behavior of Casey's approach to rounding a float to an int. We would
+        // prefer to use `@floor`, but if a value is Inf/-Inf the conversion to int causes a panic. Once the issue that
+        // causes `f_coord` in `mapIntoGrid` to have invalid values we should be able to go back to using `@floor`
+        // instead of this.
+        fn floorReal32ToInt32(value: f32) i32 {
+            if (!std.math.isFinite(value)) {
+                return std.math.minInt(i32);
+            }
+            return @floor(value);
+        }
+
         pub fn f32ToI32(self: *Vector3) Vector3i {
             return .new(
-                @floor(self.x()),
-                @floor(self.y()),
-                @floor(self.z()),
+                floorReal32ToInt32(self.x()),
+                floorReal32ToInt32(self.y()),
+                floorReal32ToInt32(self.z()),
             );
         }
 

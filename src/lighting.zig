@@ -32,6 +32,7 @@ const RenderSetup = renderer.RenderSetup;
 const RenderCommands = renderer.RenderCommands;
 const RendererTexture = renderer.RendererTexture;
 const LightingBox = renderer.LightingBox;
+const LightProbeIrradiance = renderer.LightProbeIrradiance;
 const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
@@ -48,49 +49,13 @@ pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
 pub const MAX_LIGHT_BOX_COUNT = 2 * 8192;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
-pub const LIGHT_LOOKUP_VOXEL_DIM = 32;
+pub const LIGHT_LOOKUP_VOXEL_DIM_POW_2 = 5;
+pub const LIGHT_LOOKUP_VOXEL_DIM = (1 << LIGHT_LOOKUP_VOXEL_DIM_POW_2);
 pub const MAX_LIGHT_PROBE_COUNT = 2 * 8192;
 pub const MAX_LIGHT_OCCLUDER_COUNT = 2 * 8192;
 pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
 
 const SLOW = shared.SLOW;
-
-const LightProbe = extern struct {
-    position: Vector3 = .zero(),
-    colors: [6]Color3 = @splat(.zero()),
-
-    pub fn getLight(self: *const LightProbe, emission_direction: Vector3) Color3 {
-        // TODO: As we try to optimize the lighting, we can definitely make this routine a lot faster. We can probably
-        // just do a 6-way blend and use min/max in SSE to zero out the contribution of the values which are facing in
-        // the opposite direction.
-
-        var uvw: Vector3 = .new(
-            @abs(emission_direction.x()),
-            @abs(emission_direction.y()),
-            @abs(emission_direction.z()),
-        );
-
-        // TODO: This need to guard for division by zero eventually when we SIMD this.
-        const inverse_normal: f32 = 1 / (uvw.x() + uvw.y() + uvw.z());
-        uvw = uvw.scaledTo(inverse_normal);
-
-        const x_color: Color3 = if (emission_direction.x() < 0) self.colors[0] else self.colors[1];
-        const y_color: Color3 = if (emission_direction.y() < 0) self.colors[2] else self.colors[3];
-        const z_color: Color3 = if (emission_direction.z() < 0) self.colors[4] else self.colors[5];
-
-        const result = x_color.scaledTo(uvw.x()).plus(y_color.scaledTo(uvw.y())).plus(z_color.scaledTo(uvw.z()));
-        return result;
-    }
-
-    pub fn accumulate(self: *LightProbe, contribution: f32, source: *LightProbe) void {
-        self.colors[0] = self.colors[0].plus(source.colors[0].scaledTo(contribution));
-        self.colors[1] = self.colors[1].plus(source.colors[1].scaledTo(contribution));
-        self.colors[2] = self.colors[2].plus(source.colors[2].scaledTo(contribution));
-        self.colors[3] = self.colors[3].plus(source.colors[3].scaledTo(contribution));
-        self.colors[4] = self.colors[4].plus(source.colors[4].scaledTo(contribution));
-        self.colors[5] = self.colors[5].plus(source.colors[5].scaledTo(contribution));
-    }
-};
 
 const SpatialIndexMapping = extern struct {
     cell_coord: Vector3i = .zero(),
@@ -102,21 +67,41 @@ const LightProbeSpatialIndex = extern struct {
     cell_dimension: Vector3,
     inverse_cell_dimension: Vector3,
     dimension_power_of_2: Vector3i,
-    total_light_count: u32,
+    total_cell_count: u32,
     light_index: [*]u16,
 
     fn mapIntoGrid(self: *LightProbeSpatialIndex, position: Vector3) SpatialIndexMapping {
         var result: SpatialIndexMapping = .{};
         var f_coord: Vector3 = self.inverse_cell_dimension.hadamardProduct(position.minus(self.min_corner));
         result.cell_coord = f_coord.f32ToI32();
+
+        // Doing this here makes it well-bounded, but it gives incorrect results for queries outside the grid.
         result.uvw = f_coord.minus(result.cell_coord.i32ToF32());
+
+        _ = result.cell_coord.setX(math.clampi32(
+            0,
+            result.cell_coord.x(),
+            (@as(i32, 1) << @intCast(self.dimension_power_of_2.x())) - 1,
+        ));
+        _ = result.cell_coord.setY(math.clampi32(
+            0,
+            result.cell_coord.y(),
+            (@as(i32, 1) << @intCast(self.dimension_power_of_2.y())) - 1,
+        ));
+        _ = result.cell_coord.setZ(math.clampi32(
+            0,
+            result.cell_coord.z(),
+            (@as(i32, 1) << @intCast(self.dimension_power_of_2.z())) - 1,
+        ));
+
         return result;
     }
 
     fn getSpatialIndexAddress(self: *LightProbeSpatialIndex, cell_coord: Vector3i) u32 {
         const index: u32 =
-            @as(u32, @intCast(((((cell_coord.z() << @intCast(self.dimension_power_of_2.y())) | self.dimension_power_of_2.y()) | cell_coord.y()) <<
-                @intCast(self.dimension_power_of_2.x())))) | @as(u32, @intCast(cell_coord.x()));
+            @as(u32, @intCast((((cell_coord.z() << @as(u5, @intCast(self.dimension_power_of_2.y()))) | cell_coord.y()) <<
+                @as(u5, @intCast(self.dimension_power_of_2.x()))) | @as(i32, @intCast(cell_coord.x()))));
+
         return index;
     }
 
@@ -138,6 +123,38 @@ const LightProbeSpatialIndex = extern struct {
     }
 };
 
+pub fn getLightFromProbe(self: *const LightProbeIrradiance, emission_direction: Vector3) Color3 {
+    // TODO: As we try to optimize the lighting, we can definitely make this routine a lot faster. We can probably
+    // just do a 6-way blend and use min/max in SSE to zero out the contribution of the values which are facing in
+    // the opposite direction.
+
+    var uvw: Vector3 = .new(
+        @abs(emission_direction.x()),
+        @abs(emission_direction.y()),
+        @abs(emission_direction.z()),
+    );
+
+    // TODO: This needs to guard for division by zero eventually when we SIMD this.
+    const inverse_normal: f32 = 1 / (uvw.x() + uvw.y() + uvw.z());
+    uvw = uvw.scaledTo(inverse_normal);
+
+    const x_color: Color3 = if (emission_direction.x() < 0) self.light[0] else self.light[1];
+    const y_color: Color3 = if (emission_direction.y() < 0) self.light[2] else self.light[3];
+    const z_color: Color3 = if (emission_direction.z() < 0) self.light[4] else self.light[5];
+
+    const result = x_color.scaledTo(uvw.x()).plus(y_color.scaledTo(uvw.y())).plus(z_color.scaledTo(uvw.z()));
+    return result;
+}
+
+pub fn accumulate(self: *LightProbeIrradiance, contribution: f32, source: *LightProbeIrradiance) void {
+    self.light[0] = self.light[0].plus(source.light[0].scaledTo(contribution));
+    self.light[1] = self.light[1].plus(source.light[1].scaledTo(contribution));
+    self.light[2] = self.light[2].plus(source.light[2].scaledTo(contribution));
+    self.light[3] = self.light[3].plus(source.light[3].scaledTo(contribution));
+    self.light[4] = self.light[4].plus(source.light[4].scaledTo(contribution));
+    self.light[5] = self.light[5].plus(source.light[5].scaledTo(contribution));
+}
+
 pub const LightingSolution = struct {
     // TODO: We probably want to convert this system to one that actually uses a permanent box array where entities
     // just write their box position directly into the cache in a known location, rather than generating the entire
@@ -156,8 +173,6 @@ pub const LightingSolution = struct {
 
     debug_box_draw_depth: u32,
 
-    sample_table: [16]Vector3 = undefined, // Must always have a length that is a power of two.
-
     max_work_count: u32,
     works: [*]LightingWork = undefined, // 256.
     accumulated_pps: [*]Color3 = undefined, // LIGHT_DATA_WIDTH * 6.
@@ -172,9 +187,10 @@ pub const LightingSolution = struct {
 
     sampling_spheres: [*]LightSamplingSphere,
 
-    light_probe_count: u16,
+    light_probe_count: u32,
+    light_probe_position: [*]Vector3,
+    light_probe_irradiance: [*]LightProbeIrradiance,
     spatial_probe_index: LightProbeSpatialIndex,
-    light_probes: [*]LightProbe,
 
     debug_light_position: Vector3,
 
@@ -182,19 +198,21 @@ pub const LightingSolution = struct {
         self: *LightingSolution,
         spatial_index: *LightProbeSpatialIndex,
         probe_index: u16,
-        probe_min_position: Vector3,
-        probe_max_position: Vector3,
+        probe_position: Vector3,
+        radius: Vector3,
     ) void {
-        const this_probe: *LightProbe = self.getProbe(probe_index);
+        const probe_min_position: Vector3 = probe_position.minus(radius);
+        const probe_max_position: Vector3 = probe_position.plus(radius);
+
         const min_index: Vector3i = spatial_index.mapIntoGrid(probe_min_position).cell_coord;
         const max_index: Vector3i = spatial_index.mapIntoGrid(probe_max_position).cell_coord;
 
         var z: i32 = min_index.z();
-        while (z <= max_index.z) : (z += 1) {
+        while (z <= max_index.z()) : (z += 1) {
             var y: i32 = min_index.y();
-            while (y <= max_index.y) : (y += 1) {
+            while (y <= max_index.y()) : (y += 1) {
                 var x: i32 = min_index.x();
-                while (x <= max_index.x) : (x += 1) {
+                while (x <= max_index.x()) : (x += 1) {
                     const cell_coord: Vector3i = .new(x, y, z);
                     const cell_center: Vector3 = spatial_index.getCenter(cell_coord);
 
@@ -205,9 +223,9 @@ pub const LightingSolution = struct {
                     if (existing_index.* == 0) {
                         existing_index.* = probe_index;
                     } else {
-                        const existing_probe: *LightProbe = self.getProbe(existing_index.*);
-                        const distance_to_this_sq: f32 = this_probe.position.minus(cell_center).lengthSquared();
-                        const distance_to_existing_sq: f32 = existing_probe.position.minus(cell_center).lengthSquared();
+                        const existing_probe_position: Vector3 = self.light_probe_position[existing_index.*];
+                        const distance_to_this_sq: f32 = probe_position.minus(cell_center).lengthSquared();
+                        const distance_to_existing_sq: f32 = existing_probe_position.minus(cell_center).lengthSquared();
                         if (distance_to_existing_sq > distance_to_this_sq) {
                             existing_index.* = probe_index;
                         }
@@ -217,13 +235,14 @@ pub const LightingSolution = struct {
         }
     }
 
-    pub fn getProbe(self: *LightingSolution, index: u16) *LightProbe {
-        const result: *LightProbe = &self.light_probes[index];
+    pub fn getProbe(self: *LightingSolution, index: u16) *LightProbeIrradiance {
+        const result: *LightProbeIrradiance = &self.light_probe_irradiance[index];
         return result;
     }
 
-    pub fn getProbeFromCell(self: *LightingSolution, cell_position: Vector3i) *LightProbe {
-        const result: *LightProbe = self.getProbe(self.spatial_probe_index.getCornerLightIndex(cell_position).*);
+    pub fn getProbeFromCell(self: *LightingSolution, cell_position: Vector3i) *LightProbeIrradiance {
+        const result: *LightProbeIrradiance =
+            self.getProbe(self.spatial_probe_index.getCornerLightIndex(cell_position).*);
         return result;
     }
 
@@ -231,17 +250,17 @@ pub const LightingSolution = struct {
         self: *LightingSolution,
         position: Vector3i,
         uvw: Vector3,
-    ) LightProbe {
-        const p0: *LightProbe = self.getProbeFromCell(position);
-        const p1: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 0, 0)));
-        const p2: *LightProbe = self.getProbeFromCell(position.plus(.new(0, 1, 0)));
-        const p3: *LightProbe = self.getProbeFromCell(position.plus(.new(0, 0, 1)));
-        const p4: *LightProbe = self.getProbeFromCell(position.plus(.new(0, 1, 1)));
-        const p5: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 1, 0)));
-        const p6: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 0, 1)));
-        const p7: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 1, 1)));
+    ) LightProbeIrradiance {
+        const p0: *LightProbeIrradiance = self.getProbeFromCell(position);
+        const p1: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 0, 0)));
+        const p2: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 1, 0)));
+        const p3: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 0, 1)));
+        const p4: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 1, 1)));
+        const p5: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 1, 0)));
+        const p6: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 0, 1)));
+        const p7: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 1, 1)));
 
-        var c: LightProbe = .{};
+        var c: LightProbeIrradiance = .{};
         c.accumulate((1 - uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p0);
         c.accumulate((uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p1);
         c.accumulate((1 - uvw.x()) * (uvw.y()) * (1 - uvw.z()), p2);
@@ -258,7 +277,7 @@ pub const LightingSolution = struct {
         self: *LightingSolution,
         spatial_index: *LightProbeSpatialIndex,
         position: Vector3,
-    ) LightProbe {
+    ) LightProbeIrradiance {
         const mapping = spatial_index.mapIntoGrid(position);
         return self.getProbeLightingForCell(mapping.cell_coord, mapping.uvw);
     }
@@ -417,7 +436,7 @@ fn raycast(
                     hit_box_radius = hit_box_radius.select(mask, box_radius);
                     hit_reflection_color =
                         hit_reflection_color.select(mask, .fromVector3(box.reflection_color.toVector3()));
-                    hit_emission = @select(f32, mask, hit_emission, @as(F32_4x, @splat(box.emission)));
+                    hit_emission = @select(f32, mask, @as(F32_4x, @splat(box.emission)), hit_emission);
 
                     // TODO: I think this was just a straight-up bug in our original implementation.
                     if (false) {
@@ -492,14 +511,14 @@ fn computeLightPropagation(
 
     var light_probe_index: u32 = first_light_probe_index; // Light point index 0 is never used.
     while (light_probe_index < one_past_last_light_probe_index) : (light_probe_index += 1) {
-        const light_probe: *LightProbe = &solution.light_probes[light_probe_index];
-        const ray_origin: V3_4x = .fromVector3(light_probe.position);
+        const light_probe_position: Vector3 = solution.light_probe_position[light_probe_index];
+        const ray_origin: V3_4x = .fromVector3(light_probe_position);
 
         if (INTERNAL) {
             if (light_probe_index == solution.debug_probe_index) {
-                pushDebugLine(solution, light_probe.position, light_probe.position.plus(.new(1, 0, 0)), .new(1, 0, 0, 1));
-                pushDebugLine(solution, light_probe.position, light_probe.position.plus(.new(0, 1, 0)), .new(0, 1, 0, 1));
-                pushDebugLine(solution, light_probe.position, light_probe.position.plus(.new(0, 0, 1)), .new(0, 0, 1, 1));
+                pushDebugLine(solution, light_probe_position, light_probe_position.plus(.new(1, 0, 0)), .new(1, 0, 0, 1));
+                pushDebugLine(solution, light_probe_position, light_probe_position.plus(.new(0, 1, 0)), .new(0, 1, 0, 1));
+                pushDebugLine(solution, light_probe_position, light_probe_position.plus(.new(0, 0, 1)), .new(0, 0, 1, 1));
             }
         }
 
@@ -523,11 +542,11 @@ fn computeLightPropagation(
                         const sample_direction: Vector3 = ray_direction.getComponent(sub_ray);
                         pushDebugLine(
                             solution,
-                            light_probe.position,
+                            light_probe_position,
                             if (hit)
                                 ray.position.getComponent(sub_ray)
                             else
-                                light_probe.position.plus(sample_direction.scaledTo(0.25)),
+                                light_probe_position.plus(sample_direction.scaledTo(0.25)),
                             if (hit) .new(0, 1, 1, 1) else .new(1, 1, 0, 1),
                         );
                     }
@@ -543,9 +562,9 @@ fn computeLightPropagation(
 
                     const reflection_falloff: f32 = math.clampf01(probe_sample_normal.dotProduct(emission_direction));
 
-                    const composite_probe: LightProbe =
+                    const composite_probe: LightProbeIrradiance =
                         solution.getProbeLightingForWorldPosition(spatial_index, probe_sample_position);
-                    const light_sample: Color3 = composite_probe.getLight(probe_sample_normal);
+                    const light_sample: Color3 = getLightFromProbe(composite_probe, probe_sample_normal);
                     transfer_pps =
                         light_sample.hadamardProduct(sample_reflection_color.toColor3()).scaledTo(reflection_falloff).plus(
                             sample_reflection_color.toColor3().scaledTo(emission),
@@ -778,7 +797,27 @@ pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
     solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true), @src());
     solution.accumulated_pps = arena.pushArray(6 * LIGHT_DATA_WIDTH, Color3, .aligned(64, true), @src());
     solution.sampling_spheres = &sampling_spheres.light_sampling_sphere_table;
-    // solution.light_boxes = arena.pushArray()
+    solution.spatial_probe_index.total_cell_count = LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM;
+    solution.spatial_probe_index.light_index = arena.pushArray(solution.spatial_probe_index.total_cell_count, u16, null, @src());
+}
+
+fn irradiancePack(light_intensity: Color3) u32 {
+    var result: u32 = 0;
+    const max_value: f32 = @max(light_intensity.r(), @max(light_intensity.g(), light_intensity.b()));
+
+    if (max_value > 0) {
+        const inverse_max_value: f32 = 1.0 / max_value;
+        const alpha: f32 = math.clampf01(max_value / MAX_LIGHT_INTENSITY);
+
+        result = Color.new(
+            inverse_max_value * light_intensity.r(),
+            inverse_max_value * light_intensity.g(),
+            inverse_max_value * light_intensity.b(),
+            alpha,
+        ).scaledTo(255).packColorBGRA();
+    }
+
+    return result;
 }
 
 pub fn beginLightingComputation(
@@ -787,11 +826,20 @@ pub fn beginLightingComputation(
     light_bounds: Rectangle3,
     enable_lighting: bool,
 ) void {
-    _ = solution;
-    //
-
     if (enable_lighting) {
+        const light_dimension: Vector3 = light_bounds.getDimension();
+        const inverse_light_dimension: Vector3 = light_dimension.divideFByMe(1);
+        group.setLightBounds(light_bounds.min, inverse_light_dimension);
+
         group.enableLighting(light_bounds);
+
+        const cell_count: u32 = group.commands.light_index_voxel_dimension;
+        const inverse_cell_count: Vector3 = Vector3.newU(cell_count, cell_count, cell_count).divideFByMe(1);
+
+        solution.spatial_probe_index.min_corner = light_bounds.min;
+        solution.spatial_probe_index.cell_dimension = light_dimension.hadamardProduct(inverse_cell_count);
+        solution.spatial_probe_index.inverse_cell_dimension = solution.spatial_probe_index.cell_dimension.divideFByMe(1);
+        solution.spatial_probe_index.dimension_power_of_2 = .splat(LIGHT_LOOKUP_VOXEL_DIM_POW_2);
     }
 }
 
@@ -803,108 +851,95 @@ pub fn endLightingComputation(
     TimedBlock.beginFunction(@src(), .LightingTest);
     defer TimedBlock.endFunction(@src(), .LightingTest);
 
-    solution.sample_table[0] = Vector3.new(0.2, 0, 1).normalizeOrZero();
-    solution.sample_table[1] = Vector3.new(-0.2, 0, 1).normalizeOrZero();
-    solution.sample_table[2] = Vector3.new(0, 0.2, 1).normalizeOrZero();
-    solution.sample_table[3] = Vector3.new(0, -0.2, 1).normalizeOrZero();
+    // const setup: *RenderSetup = &group.last_setup;
+    const commands: *RenderCommands = group.commands;
+    const voxel_dimension: u32 = commands.light_index_voxel_dimension;
 
-    solution.sample_table[4] = Vector3.new(-0.5, -0.5, 0.5).normalizeOrZero();
-    solution.sample_table[5] = Vector3.new(-0.5, 0, 0.5).normalizeOrZero();
-    solution.sample_table[6] = Vector3.new(-0.5, 0.5, 0.5).normalizeOrZero();
-    solution.sample_table[7] = Vector3.new(0.5, -0.5, 0.5).normalizeOrZero();
-    solution.sample_table[8] = Vector3.new(0.5, 0, 0.5).normalizeOrZero();
-    solution.sample_table[9] = Vector3.new(0.5, 0.5, 0.5).normalizeOrZero();
-    solution.sample_table[10] = Vector3.new(0, -0.5, 0.5).normalizeOrZero();
-    solution.sample_table[11] = Vector3.new(0, 0.5, 0.5).normalizeOrZero();
-
-    solution.sample_table[12] = Vector3.new(1, 0, 0.25).normalizeOrZero();
-    solution.sample_table[13] = Vector3.new(-1, 0, 0.25).normalizeOrZero();
-    solution.sample_table[14] = Vector3.new(0, 1, 0.25).normalizeOrZero();
-    solution.sample_table[15] = Vector3.new(0, -1, 0.25).normalizeOrZero();
+    solution.light_probe_count = commands.light_probe_count;
+    solution.light_probe_position = commands.light_probe_position;
+    solution.light_probe_irradiance = commands.light_probe_irradiance;
 
     if (solution.update_debug_lines) {
         solution.debug_line_count = 0;
     }
     solution.box_reference_count = 0;
     solution.box_count = @intCast(group.commands.light_occluder_count);
-    const original_box_count: u32 = solution.box_count;
     solution.boxes = group.commands.light_occluders;
     // solution.point_count = group.light_point_index;
 
-    const t_update: f32 = 0.05;
+    const probe_position: [*]Vector3 = group.commands.light_probe_position;
+    const probe_irradiance: [*]LightProbeIrradiance = group.commands.light_probe_irradiance;
 
-    var should_accumulate: bool = false;
-    var accumulation_coefficient: f32 = 1;
+    // From the linear blend coeeficient t_irradiance_preservation between the two successive frames of irradiance data,
+    // we "derive" two coefficients, one for the multiplication at the end that renormalizes, and one for the new ray
+    // contributions. This is to avoid pre-multiplying the existing probes in a first pass.
+    const t_irradiance_preservation: f32 = 59.0 / 60.0;
+    var irradiance_blend_u: f32 = t_irradiance_preservation;
+    var irradiance_blend_v: f32 = (1 - irradiance_blend_u) / irradiance_blend_u;
+
+    // When doing long-term accumulation for testing, we turn off the linear blend and instead just set the
+    // coefficients for long-term averaging.
     if (solution.accumulating) {
+        irradiance_blend_u = 1;
         if (solution.accumulation_count < LIGHT_TEST_ACCUMULATION_COUNT) {
-            accumulation_coefficient = 0;
-            if (solution.accumulation_count > 0) {
-                accumulation_coefficient = 1.0 / solution.accumulation_count;
-            }
-            should_accumulate = true;
+            irradiance_blend_v = 1.0 / @as(f32, @floatFromInt(LIGHT_TEST_ACCUMULATION_COUNT));
+        } else {
+            irradiance_blend_v = 0;
         }
     }
 
-    // buildSpatialPartitionForLighting(solution);
+    const light_position: Vector3 = solution.debug_light_position;
+    const light_radius_coefficient: f32 = 3;
+    const light_intensity: f32 = 0.025 * MAX_LIGHT_INTENSITY;
+    const light_color: Color3 = .new(1, 1, 1);
 
-    _ = lighting_queue;
-    // computeAllLightPropagation(solution, lighting_queue);
+    {
+        var light_probe_index: u16 = 0;
+        while (light_probe_index < solution.light_probe_count) : (light_probe_index += 1) {
+            const position: Vector3 = probe_position[light_probe_index];
+            const radius: Vector3 = .new(1, 1, 1);
+            solution.addProbeToSpacialIndex(&solution.spatial_probe_index, light_probe_index, position, radius);
 
-    if (solution.accumulating) {
-        if (should_accumulate) {
-            solution.accumulation_count += 1;
+            if (true) {
+                var light_normal: Vector3 = light_position.minus(position);
+                const light_distance: f32 = light_normal.length();
+                light_normal = light_normal.normalizeOrZero();
+
+                var light_coefficient: f32 = math.clampf01(1.0 - light_radius_coefficient * light_distance);
+                light_coefficient = light_intensity * light_coefficient;
+
+                var west_alpha: f32 = math.clampf01(-light_normal.x());
+                var east_alpha: f32 = math.clampf01(light_normal.x());
+                var south_alpha: f32 = math.clampf01(-light_normal.y());
+                var north_alpha: f32 = math.clampf01(light_normal.y());
+                var down_alpha: f32 = math.clampf01(-light_normal.z());
+                var up_alpha: f32 = math.clampf01(light_normal.z());
+
+                const total_alpha: f32 =
+                    west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
+                const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
+
+                west_alpha *= inverse_total_alpha;
+                east_alpha *= inverse_total_alpha;
+                south_alpha *= inverse_total_alpha;
+                north_alpha *= inverse_total_alpha;
+                down_alpha *= inverse_total_alpha;
+                up_alpha *= inverse_total_alpha;
+
+                const irradiance: *LightProbeIrradiance = &probe_irradiance[light_probe_index];
+                irradiance.light[0] = light_color.scaledTo(west_alpha);
+                irradiance.light[1] = light_color.scaledTo(east_alpha);
+                irradiance.light[2] = light_color.scaledTo(south_alpha);
+                irradiance.light[3] = light_color.scaledTo(north_alpha);
+                irradiance.light[4] = light_color.scaledTo(down_alpha);
+                irradiance.light[5] = light_color.scaledTo(up_alpha);
+            }
         }
-        accumulation_coefficient = 1.0 / solution.accumulation_count;
     }
 
     if (false) {
-        var box_index: u32 = 0;
-        while (box_index < original_box_count) : (box_index += 1) {
-            const box: *LightingBox = @ptrCast(solution.boxes + box_index);
-            const local_count: u32 = box.light_index[6] - box.light_index[0];
-            var local_index: u32 = 0;
-            while (local_index < local_count) : (local_index += 1) {
-                const point_index: u32 = local_index + box.light_index[0];
-
-                // Can probably remove the accumulated weight check if we always guarantee at least
-                // one positively weighted sample per point?
-                const accumulated_weight: f32 = solution.accumulated_weight[point_index];
-                var inverse_weight: f32 = 0;
-                if (accumulated_weight > 0) {
-                    inverse_weight = 1.0 / accumulated_weight;
-                }
-                const accumulated_pps: Color3 = solution.accumulated_pps[point_index].scaledTo(inverse_weight);
-                const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
-
-                var last_pps: Color3 = accumulated_pps;
-                var last_direction: Vector3 = direction;
-
-                const box_store_direction: Vector3 = box.storage[local_index].last_direction;
-                const valid: bool =
-                    box_store_direction.x() != 0 or
-                    box_store_direction.y() != 0 or
-                    box_store_direction.z() != 0;
-                if (valid) {
-                    last_pps = box.storage[local_index].last_pps;
-                    last_direction = box_store_direction;
-                }
-
-                if (solution.accumulating) {
-                    if (should_accumulate) {
-                        box.storage[local_index].last_pps = last_pps.plus(accumulated_pps);
-                    }
-                    solution.accumulated_pps[point_index] =
-                        box.storage[local_index].last_pps.scaledTo(accumulation_coefficient);
-                } else {
-                    box.storage[local_index].last_pps = last_pps.lerp(accumulated_pps, t_update);
-                    solution.accumulated_pps[point_index] = box.storage[local_index].last_pps;
-                }
-
-                box.storage[local_index].last_direction =
-                    last_direction.lerp(direction, t_update).normalizeOrZero();
-                solution.average_direction_to_light[point_index] = box.storage[local_index].last_direction;
-            }
-        }
+        buildSpatialPartitionForLighting(solution);
+        computeAllLightPropagation(solution, lighting_queue, irradiance_blend_u);
     }
 
     _ = group.getCurrentQuads(solution.debug_line_count, group.white_texture);
@@ -916,172 +951,9 @@ pub fn endLightingComputation(
         group.pushLineSegment(white_texture, line.from_position, line.color, line.to_position, line.color, 0.01);
     }
 
-    const start_point: Vector3 = .new(0, 0, 10.05);
-
-    const color_table = [_]Color{
-        .new(0, 0, 0, 1),
-        .new(1, 0, 0, 1),
-        .new(0, 1, 0, 1),
-        .new(0, 0, 1, 1),
-        .new(1, 1, 0, 1),
-        .new(0, 1, 1, 1),
-        .new(1, 0, 1, 1),
-        .new(1, 1, 1, 1),
-    };
-
-    const cluster_table = [_]u32{
-        0,
-        1,
-        3,
-        6,
-
-        2,
-        4,
-        7,
-        12,
-
-        9,
-        14,
-        17,
-        22,
-    };
-
-    if (false) {
-        const draw_point_count: u32 = 2 * 1024;
-        _ = group.getCurrentQuads(draw_point_count * 4 * 6, group.white_texture);
-        var test_series_x: random.SeriesPCG = .seed(23984593284, 3249823984);
-        var test_series_y: random.SeriesPCG = .seed(85462378423, 90857892378);
-        var test_series_z: random.SeriesPCG = .seed(34205873903, 94569083);
-        // var test_series_x: random.Series = .seed(239843284, null, null, null);
-        // var test_series_y: random.Series = .seed(854623723, null, null, null);
-        // var test_series_z: random.Series = .seed(342058739, null, null, null);
-        var point_index: u32 = 0;
-        while (point_index < draw_point_count) : (point_index += 1) {
-            while (true) {
-                if (false) {
-                    var dir: Vector3 = Vector3.new(
-                        test_series_x.randomBilateral(),
-                        test_series_y.randomBilateral(),
-                        test_series_z.randomBilateral(),
-                    );
-
-                    if (dir.z() < 0) {
-                        _ = dir.setZ(-dir.z());
-                    }
-
-                    if (dir.lengthSquared() <= 1.0) {
-                        dir = dir.normalizeOrZero();
-                        group.pushCube(
-                            white_texture,
-                            start_point.plus(dir),
-                            0.01,
-                            0.02,
-                            .new(1, 1, 0, 1),
-                            null,
-                            null,
-                        );
-                        break;
-                    }
-                } else {
-                    const x1: f32 = test_series_x.randomBilateral();
-                    const x2: f32 = test_series_y.randomBilateral();
-                    const sqr: f32 = x1 * x1 + x2 * x2;
-                    const root: f32 = @sqrt(1 - x1 * x1 - x2 * x2);
-
-                    const dir: Vector3 = .new(
-                        2.0 * x1 * root,
-                        2.0 * x2 * root,
-                        1.0 - 2.0 * sqr,
-                    );
-
-                    if (sqr < 0.5) {
-                        group.pushCube(
-                            white_texture,
-                            start_point.plus(dir),
-                            0.01,
-                            0.02,
-                            .new(1, 1, 0, 1),
-                            null,
-                            null,
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
     if (true) {
-        var sphere_index: u32 = 0;
-        while (sphere_index < LIGHT_SAMPLING_SPHERE_COUNT) : (sphere_index += 1) {
-            const sphere: *LightSamplingSphere = &solution.sampling_spheres[sphere_index];
-            var point_index: u32 = 0;
-            while (point_index < LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE) : (point_index += 1) {
-                var component_index: u32 = 0;
-                while (component_index < 4) : (component_index += 1) {
-                    const color: Color = handmade.getDebugColor4(sphere_index, null);
-                    const normal: Vector3 = sphere.sample_direction[point_index].getComponent(component_index);
-
-                    group.pushCube(
-                        white_texture,
-                        start_point.plus(normal),
-                        .splat(0.01),
-                        color,
-                        null,
-                        null,
-                        null,
-                    );
-                }
-            }
-        }
-    }
-
-    if (false) {
-        var point_index: u32 = 0;
-        while (point_index < cluster_table.len) : (point_index += 1) {
-            const color: Color = color_table[@mod(point_index / 4, color_table.len)];
-            const normal: Vector3 = solution.sample_points[cluster_table[point_index]];
-            group.pushLineSegment(
-                white_texture,
-                start_point.plus(normal),
-                color,
-                start_point.plus(normal.scaledTo(1.06)),
-                color,
-                0.01,
-            );
-        }
-    }
-
-    if (false) {
-        TimedBlock.beginFunction(@src(), .OutputLightingTextures);
-        defer TimedBlock.endFunction(@src(), .OutputLightingTextures);
-
-        var point_index: u32 = 1; // Light point index 0 is never used.
-        while (point_index < solution.point_count) : (point_index += 1) {
-            const point: *LightingPoint = &solution.points[point_index];
-            // const position: Vector3 = point.position;
-            var color: Color3 = solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
-            const direction: Vector3 = point.normal;
-
-            if (direction.z() < 0) {
-                // _ = direction.setZ(-direction.z());
-                // Negate the red channel to indicate that Z was negative, since we have no storage for the sign of Z.
-                _ = color.setR(-color.r());
-            }
-
-            // dest.light_data0[point.pack_index] = .new(position.x(), position.y(), position.z(), direction.x());
-            // dest.light_data1[point.pack_index] = .new(color.r(), color.g(), color.b(), direction.y());
-        }
-    }
-
-    if (true) {
-        const light_position: Vector3 = solution.debug_light_position;
-
-        const setup: *RenderSetup = &group.last_setup;
-        const commands: *RenderCommands = group.commands;
-        const voxel_dimension: u32 = commands.light_index_voxel_dimension;
-        const inverse_voxel_dimension: Vector3 =
-            Vector3.newU(voxel_dimension, voxel_dimension, voxel_dimension).divideFByMe(1);
+        // const inverse_voxel_dimension: Vector3 =
+        //     Vector3.newU(voxel_dimension, voxel_dimension, voxel_dimension).divideFByMe(1);
 
         const west: u32 = @backingInt(box_mod.BoxSurfaceIndex.West);
         const east: u32 = @backingInt(box_mod.BoxSurfaceIndex.East);
@@ -1090,74 +962,87 @@ pub fn endLightingComputation(
         const up: u32 = @backingInt(box_mod.BoxSurfaceIndex.Up);
         const down: u32 = @backingInt(box_mod.BoxSurfaceIndex.Down);
 
-        const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
-        const light_uvw: Vector3 =
-            voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
-        const light_radius_coefficient: f32 = 3;
-        const light_intensity: f32 = 0.025 * MAX_LIGHT_INTENSITY;
+        // const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
+        // const light_uvw: Vector3 =
+        //     voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
 
+        var probe_index_pointer: [*]u16 = solution.spatial_probe_index.light_index;
         var z: u32 = 0;
         while (z < voxel_dimension) : (z += 1) {
             var y: u32 = 0;
             while (y < voxel_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < voxel_dimension) : (x += 1) {
-                    const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
-                    const voxel_uvw: Vector3 = inverse_voxel_dimension.hadamardProduct(voxel_center_position);
-                    var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
-                    const light_distance: f32 = light_normal.length();
-                    light_normal = light_uvw.minus(voxel_uvw).normalizeOrZero();
+                    // if (false) {
+                    //     const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
+                    //     const voxel_uvw: Vector3 = inverse_voxel_dimension.hadamardProduct(voxel_center_position);
+                    //     var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
+                    //     const light_distance: f32 = light_normal.length();
+                    //     light_normal = light_uvw.minus(voxel_uvw).normalizeOrZero();
+                    //
+                    //     var light_coefficient: f32 = math.clampf01(1.0 - light_radius_coefficient * light_distance);
+                    //     light_coefficient = light_intensity * light_coefficient;
+                    //
+                    //     var west_alpha: f32 = math.clampf01(-light_normal.x());
+                    //     var east_alpha: f32 = math.clampf01(light_normal.x());
+                    //     var south_alpha: f32 = math.clampf01(-light_normal.y());
+                    //     var north_alpha: f32 = math.clampf01(light_normal.y());
+                    //     var down_alpha: f32 = math.clampf01(-light_normal.z());
+                    //     var up_alpha: f32 = math.clampf01(light_normal.z());
+                    //
+                    //     const total_alpha: f32 =
+                    //         west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
+                    //     const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
+                    //     west_alpha *= inverse_total_alpha;
+                    //     east_alpha *= inverse_total_alpha;
+                    //     south_alpha *= inverse_total_alpha;
+                    //     north_alpha *= inverse_total_alpha;
+                    //     down_alpha *= inverse_total_alpha;
+                    //     up_alpha *= inverse_total_alpha;
+                    //
+                    //     const light_west: u32 = Color.new(1, 1, 1, west_alpha).scaledTo(255).packColorRGBA();
+                    //     const light_east: u32 = Color.new(1, 1, 1, east_alpha).scaledTo(255).packColorRGBA();
+                    //
+                    //     const light_south: u32 = Color.new(1, 1, 1, south_alpha).scaledTo(255).packColorRGBA();
+                    //     const light_north: u32 = Color.new(1, 1, 1, north_alpha).scaledTo(255).packColorRGBA();
+                    //
+                    //     const light_down: u32 = Color.new(1, 1, 1, down_alpha).scaledTo(255).packColorRGBA();
+                    //     const light_up: u32 = Color.new(1, 1, 1, up_alpha).scaledTo(255).packColorRGBA();
+                    //
+                    //     if (false) {
+                    //         if (@mod(x, 2) == 0) {
+                    //             light_west |= 0x00ff0000;
+                    //         }
+                    //         if (@mod(y, 2) == 0) {
+                    //             light_east |= 0x0000ff00;
+                    //         }
+                    //         if (@mod(x, 2) == 0) {
+                    //             light_down |= 0x000000ff;
+                    //         }
+                    //
+                    //         if (x == (voxel_dimension - 1)) {
+                    //             light_west |= 0x0000ffff;
+                    //         }
+                    //         if (y == (voxel_dimension - 1)) {
+                    //             light_east |= 0x0000ffff;
+                    //         }
+                    //         if (z == (voxel_dimension - 1)) {
+                    //             light_down |= 0x0000ffff;
+                    //         }
+                    //     }
+                    // }
 
-                    var light_coefficient: f32 = math.clampf01(1.0 - light_radius_coefficient * light_distance);
-                    light_coefficient = light_intensity * light_coefficient;
+                    const probe_index: u16 = probe_index_pointer[0];
+                    probe_index_pointer[0] = 0;
+                    probe_index_pointer += 1;
 
-                    var west_alpha: f32 = math.clampf01(-light_normal.x());
-                    var east_alpha: f32 = math.clampf01(light_normal.x());
-                    var south_alpha: f32 = math.clampf01(-light_normal.y());
-                    var north_alpha: f32 = math.clampf01(light_normal.y());
-                    var down_alpha: f32 = math.clampf01(-light_normal.z());
-                    var up_alpha: f32 = math.clampf01(light_normal.z());
-
-                    const total_alpha: f32 =
-                        west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
-                    const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
-                    west_alpha *= inverse_total_alpha;
-                    east_alpha *= inverse_total_alpha;
-                    south_alpha *= inverse_total_alpha;
-                    north_alpha *= inverse_total_alpha;
-                    down_alpha *= inverse_total_alpha;
-                    up_alpha *= inverse_total_alpha;
-
-                    const light_west: u32 = Color.new(1, 1, 1, west_alpha).scaledTo(255).packColorRGBA();
-                    const light_east: u32 = Color.new(1, 1, 1, east_alpha).scaledTo(255).packColorRGBA();
-
-                    const light_south: u32 = Color.new(1, 1, 1, south_alpha).scaledTo(255).packColorRGBA();
-                    const light_north: u32 = Color.new(1, 1, 1, north_alpha).scaledTo(255).packColorRGBA();
-
-                    const light_down: u32 = Color.new(1, 1, 1, down_alpha).scaledTo(255).packColorRGBA();
-                    const light_up: u32 = Color.new(1, 1, 1, up_alpha).scaledTo(255).packColorRGBA();
-
-                    if (false) {
-                        if (@mod(x, 2) == 0) {
-                            light_west |= 0x00ff0000;
-                        }
-                        if (@mod(y, 2) == 0) {
-                            light_east |= 0x0000ff00;
-                        }
-                        if (@mod(x, 2) == 0) {
-                            light_down |= 0x000000ff;
-                        }
-
-                        if (x == (voxel_dimension - 1)) {
-                            light_west |= 0x0000ffff;
-                        }
-                        if (y == (voxel_dimension - 1)) {
-                            light_east |= 0x0000ffff;
-                        }
-                        if (z == (voxel_dimension - 1)) {
-                            light_down |= 0x0000ffff;
-                        }
-                    }
+                    const irradiance: *LightProbeIrradiance = &probe_irradiance[probe_index];
+                    const light_west: u32 = irradiancePack(irradiance.light[0].scaledTo(irradiance_blend_u));
+                    const light_east: u32 = irradiancePack(irradiance.light[1].scaledTo(irradiance_blend_u));
+                    const light_south: u32 = irradiancePack(irradiance.light[2].scaledTo(irradiance_blend_u));
+                    const light_north: u32 = irradiancePack(irradiance.light[3].scaledTo(irradiance_blend_u));
+                    const light_down: u32 = irradiancePack(irradiance.light[4].scaledTo(irradiance_blend_u));
+                    const light_up: u32 = irradiancePack(irradiance.light[5].scaledTo(irradiance_blend_u));
 
                     commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
                         light_west;
@@ -1277,3 +1162,212 @@ fn outputLightingPointsRecurse(
         }
     }
 }
+
+// Old light transport code.
+// if (false) {
+//     const original_box_count: u32 = solution.box_count;
+//     const t_update: f32 = 0.05;
+//     var box_index: u32 = 0;
+//     while (box_index < original_box_count) : (box_index += 1) {
+//         const box: *LightingBox = @ptrCast(solution.boxes + box_index);
+//         const local_count: u32 = box.light_index[6] - box.light_index[0];
+//         var local_index: u32 = 0;
+//         while (local_index < local_count) : (local_index += 1) {
+//             const point_index: u32 = local_index + box.light_index[0];
+//
+//             // Can probably remove the accumulated weight check if we always guarantee at least
+//             // one positively weighted sample per point?
+//             const accumulated_weight: f32 = solution.accumulated_weight[point_index];
+//             var inverse_weight: f32 = 0;
+//             if (accumulated_weight > 0) {
+//                 inverse_weight = 1.0 / accumulated_weight;
+//             }
+//             const accumulated_pps: Color3 = solution.accumulated_pps[point_index].scaledTo(inverse_weight);
+//             const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
+//
+//             var last_pps: Color3 = accumulated_pps;
+//             var last_direction: Vector3 = direction;
+//
+//             const box_store_direction: Vector3 = box.storage[local_index].last_direction;
+//             const valid: bool =
+//                 box_store_direction.x() != 0 or
+//                 box_store_direction.y() != 0 or
+//                 box_store_direction.z() != 0;
+//             if (valid) {
+//                 last_pps = box.storage[local_index].last_pps;
+//                 last_direction = box_store_direction;
+//             }
+//
+//             if (solution.accumulating) {
+//                 if (should_accumulate) {
+//                     box.storage[local_index].last_pps = last_pps.plus(accumulated_pps);
+//                 }
+//                 solution.accumulated_pps[point_index] =
+//                     box.storage[local_index].last_pps.scaledTo(accumulation_coefficient);
+//             } else {
+//                 box.storage[local_index].last_pps = last_pps.lerp(accumulated_pps, t_update);
+//                 solution.accumulated_pps[point_index] = box.storage[local_index].last_pps;
+//             }
+//
+//             box.storage[local_index].last_direction =
+//                 last_direction.lerp(direction, t_update).normalizeOrZero();
+//             solution.average_direction_to_light[point_index] = box.storage[local_index].last_direction;
+//         }
+//     }
+// }
+//
+// if (false) {
+//     const cluster_table = [_]u32{
+//         0,
+//         1,
+//         3,
+//         6,
+//
+//         2,
+//         4,
+//         7,
+//         12,
+//
+//         9,
+//         14,
+//         17,
+//         22,
+//     };
+//
+//     const color_table = [_]Color{
+//         .new(0, 0, 0, 1),
+//         .new(1, 0, 0, 1),
+//         .new(0, 1, 0, 1),
+//         .new(0, 0, 1, 1),
+//         .new(1, 1, 0, 1),
+//         .new(0, 1, 1, 1),
+//         .new(1, 0, 1, 1),
+//         .new(1, 1, 1, 1),
+//     };
+//
+//     var point_index: u32 = 0;
+//     while (point_index < cluster_table.len) : (point_index += 1) {
+//         const color: Color = color_table[@mod(point_index / 4, color_table.len)];
+//         const normal: Vector3 = solution.sample_points[cluster_table[point_index]];
+//         group.pushLineSegment(
+//             white_texture,
+//             start_point.plus(normal),
+//             color,
+//             start_point.plus(normal.scaledTo(1.06)),
+//             color,
+//             0.01,
+//         );
+//     }
+// }
+//
+// if (false) {
+//     var sphere_index: u32 = 0;
+//     while (sphere_index < LIGHT_SAMPLING_SPHERE_COUNT) : (sphere_index += 1) {
+//         const sphere: *LightSamplingSphere = &solution.sampling_spheres[sphere_index];
+//         var point_index: u32 = 0;
+//         while (point_index < LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE) : (point_index += 1) {
+//             var component_index: u32 = 0;
+//             while (component_index < 4) : (component_index += 1) {
+//                 const color: Color = handmade.getDebugColor4(sphere_index, null);
+//                 const normal: Vector3 = sphere.sample_direction[point_index].getComponent(component_index);
+//
+//                 group.pushCube(
+//                     white_texture,
+//                     start_point.plus(normal),
+//                     .splat(0.01),
+//                     color,
+//                     null,
+//                     null,
+//                     null,
+//                 );
+//             }
+//         }
+//     }
+// }
+//
+// if (false) {
+//     const draw_point_count: u32 = 2 * 1024;
+//     _ = group.getCurrentQuads(draw_point_count * 4 * 6, group.white_texture);
+//     var test_series_x: random.SeriesPCG = .seed(23984593284, 3249823984);
+//     var test_series_y: random.SeriesPCG = .seed(85462378423, 90857892378);
+//     var test_series_z: random.SeriesPCG = .seed(34205873903, 94569083);
+//     // var test_series_x: random.Series = .seed(239843284, null, null, null);
+//     // var test_series_y: random.Series = .seed(854623723, null, null, null);
+//     // var test_series_z: random.Series = .seed(342058739, null, null, null);
+//     var point_index: u32 = 0;
+//     while (point_index < draw_point_count) : (point_index += 1) {
+//         while (true) {
+//             if (false) {
+//                 var dir: Vector3 = Vector3.new(
+//                     test_series_x.randomBilateral(),
+//                     test_series_y.randomBilateral(),
+//                     test_series_z.randomBilateral(),
+//                 );
+//
+//                 if (dir.z() < 0) {
+//                     _ = dir.setZ(-dir.z());
+//                 }
+//
+//                 if (dir.lengthSquared() <= 1.0) {
+//                     dir = dir.normalizeOrZero();
+//                     group.pushCube(
+//                         white_texture,
+//                         start_point.plus(dir),
+//                         0.01,
+//                         0.02,
+//                         .new(1, 1, 0, 1),
+//                         null,
+//                         null,
+//                     );
+//                     break;
+//                 }
+//             } else {
+//                 const x1: f32 = test_series_x.randomBilateral();
+//                 const x2: f32 = test_series_y.randomBilateral();
+//                 const sqr: f32 = x1 * x1 + x2 * x2;
+//                 const root: f32 = @sqrt(1 - x1 * x1 - x2 * x2);
+//
+//                 const dir: Vector3 = .new(
+//                     2.0 * x1 * root,
+//                     2.0 * x2 * root,
+//                     1.0 - 2.0 * sqr,
+//                 );
+//
+//                 if (sqr < 0.5) {
+//                     group.pushCube(
+//                         white_texture,
+//                         start_point.plus(dir),
+//                         0.01,
+//                         0.02,
+//                         .new(1, 1, 0, 1),
+//                         null,
+//                         null,
+//                     );
+//                     break;
+//                 }
+//             }
+//         }
+//     }
+// }
+//
+// if (false) {
+//     TimedBlock.beginFunction(@src(), .OutputLightingTextures);
+//     defer TimedBlock.endFunction(@src(), .OutputLightingTextures);
+//
+//     var point_index: u32 = 1; // Light point index 0 is never used.
+//     while (point_index < solution.point_count) : (point_index += 1) {
+//         const point: *LightingPoint = &solution.points[point_index];
+//         // const position: Vector3 = point.position;
+//         var color: Color3 = solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
+//         const direction: Vector3 = point.normal;
+//
+//         if (direction.z() < 0) {
+//             // _ = direction.setZ(-direction.z());
+//             // Negate the red channel to indicate that Z was negative, since we have no storage for the sign of Z.
+//             _ = color.setR(-color.r());
+//         }
+//
+//         // dest.light_data0[point.pack_index] = .new(position.x(), position.y(), position.z(), direction.x());
+//         // dest.light_data1[point.pack_index] = .new(color.r(), color.g(), color.b(), direction.y());
+//     }
+// }

@@ -607,8 +607,6 @@ pub fn updateAndRenderWorld(
     _ = light_bounds.min.setY(light_bounds.min.y() - 0.5 * adjustment_y);
     _ = light_bounds.max.setY(light_bounds.max.y() + 0.5 * adjustment_y);
 
-    const inverse_light_dimension: Vector3 = light_bounds.getDimension().divideFByMe(1);
-    render_group.setLightBounds(light_bounds.min, inverse_light_dimension);
     lighting.beginLightingComputation(
         &world_mode.test_lighting,
         &render_group,
