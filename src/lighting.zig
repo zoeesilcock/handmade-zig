@@ -851,7 +851,7 @@ pub fn endLightingComputation(
     TimedBlock.beginFunction(@src(), .LightingTest);
     defer TimedBlock.endFunction(@src(), .LightingTest);
 
-    // const setup: *RenderSetup = &group.last_setup;
+    const setup: *RenderSetup = &group.last_setup;
     const commands: *RenderCommands = group.commands;
     const voxel_dimension: u32 = commands.light_index_voxel_dimension;
 
@@ -889,12 +889,12 @@ pub fn endLightingComputation(
     }
 
     const light_position: Vector3 = solution.debug_light_position;
-    const light_radius_coefficient: f32 = 3;
-    const light_intensity: f32 = 0.025 * MAX_LIGHT_INTENSITY;
+    const light_radius_coefficient: f32 = 1.0 / 10.0;
+    const light_intensity: f32 = 0.1 * MAX_LIGHT_INTENSITY;
     const light_color: Color3 = .new(1, 1, 1);
 
     {
-        var light_probe_index: u16 = 0;
+        var light_probe_index: u16 = 1;
         while (light_probe_index < solution.light_probe_count) : (light_probe_index += 1) {
             const position: Vector3 = probe_position[light_probe_index];
             const radius: Vector3 = .new(1, 1, 1);
@@ -952,8 +952,8 @@ pub fn endLightingComputation(
     }
 
     if (true) {
-        // const inverse_voxel_dimension: Vector3 =
-        //     Vector3.newU(voxel_dimension, voxel_dimension, voxel_dimension).divideFByMe(1);
+        const inverse_voxel_dimension: Vector3 =
+            Vector3.newU(voxel_dimension, voxel_dimension, voxel_dimension).divideFByMe(1);
 
         const west: u32 = @backingInt(box_mod.BoxSurfaceIndex.West);
         const east: u32 = @backingInt(box_mod.BoxSurfaceIndex.East);
@@ -962,9 +962,9 @@ pub fn endLightingComputation(
         const up: u32 = @backingInt(box_mod.BoxSurfaceIndex.Up);
         const down: u32 = @backingInt(box_mod.BoxSurfaceIndex.Down);
 
-        // const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
-        // const light_uvw: Vector3 =
-        //     voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
+        const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
+        const light_uvw: Vector3 =
+            voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
 
         var probe_index_pointer: [*]u16 = solution.spatial_probe_index.light_index;
         var z: u32 = 0;
@@ -973,89 +973,157 @@ pub fn endLightingComputation(
             while (y < voxel_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < voxel_dimension) : (x += 1) {
-                    // if (false) {
-                    //     const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
-                    //     const voxel_uvw: Vector3 = inverse_voxel_dimension.hadamardProduct(voxel_center_position);
-                    //     var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
-                    //     const light_distance: f32 = light_normal.length();
-                    //     light_normal = light_uvw.minus(voxel_uvw).normalizeOrZero();
-                    //
-                    //     var light_coefficient: f32 = math.clampf01(1.0 - light_radius_coefficient * light_distance);
-                    //     light_coefficient = light_intensity * light_coefficient;
-                    //
-                    //     var west_alpha: f32 = math.clampf01(-light_normal.x());
-                    //     var east_alpha: f32 = math.clampf01(light_normal.x());
-                    //     var south_alpha: f32 = math.clampf01(-light_normal.y());
-                    //     var north_alpha: f32 = math.clampf01(light_normal.y());
-                    //     var down_alpha: f32 = math.clampf01(-light_normal.z());
-                    //     var up_alpha: f32 = math.clampf01(light_normal.z());
-                    //
-                    //     const total_alpha: f32 =
-                    //         west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
-                    //     const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
-                    //     west_alpha *= inverse_total_alpha;
-                    //     east_alpha *= inverse_total_alpha;
-                    //     south_alpha *= inverse_total_alpha;
-                    //     north_alpha *= inverse_total_alpha;
-                    //     down_alpha *= inverse_total_alpha;
-                    //     up_alpha *= inverse_total_alpha;
-                    //
-                    //     const light_west: u32 = Color.new(1, 1, 1, west_alpha).scaledTo(255).packColorRGBA();
-                    //     const light_east: u32 = Color.new(1, 1, 1, east_alpha).scaledTo(255).packColorRGBA();
-                    //
-                    //     const light_south: u32 = Color.new(1, 1, 1, south_alpha).scaledTo(255).packColorRGBA();
-                    //     const light_north: u32 = Color.new(1, 1, 1, north_alpha).scaledTo(255).packColorRGBA();
-                    //
-                    //     const light_down: u32 = Color.new(1, 1, 1, down_alpha).scaledTo(255).packColorRGBA();
-                    //     const light_up: u32 = Color.new(1, 1, 1, up_alpha).scaledTo(255).packColorRGBA();
-                    //
-                    //     if (false) {
-                    //         if (@mod(x, 2) == 0) {
-                    //             light_west |= 0x00ff0000;
-                    //         }
-                    //         if (@mod(y, 2) == 0) {
-                    //             light_east |= 0x0000ff00;
-                    //         }
-                    //         if (@mod(x, 2) == 0) {
-                    //             light_down |= 0x000000ff;
-                    //         }
-                    //
-                    //         if (x == (voxel_dimension - 1)) {
-                    //             light_west |= 0x0000ffff;
-                    //         }
-                    //         if (y == (voxel_dimension - 1)) {
-                    //             light_east |= 0x0000ffff;
-                    //         }
-                    //         if (z == (voxel_dimension - 1)) {
-                    //             light_down |= 0x0000ffff;
-                    //         }
-                    //     }
-                    // }
+                    if (true) {
+                        const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
+                        const voxel_uvw: Vector3 = inverse_voxel_dimension.hadamardProduct(voxel_center_position);
+                        var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
+                        const light_distance: f32 = light_normal.length();
+                        light_normal = light_uvw.minus(voxel_uvw).normalizeOrZero();
 
-                    const probe_index: u16 = probe_index_pointer[0];
-                    probe_index_pointer[0] = 0;
-                    probe_index_pointer += 1;
+                        var light_coefficient: f32 = 1.0 - 3.0 * light_distance;
+                        light_coefficient *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
 
-                    const irradiance: *LightProbeIrradiance = &probe_irradiance[probe_index];
-                    const light_west: u32 = irradiancePack(irradiance.light[0].scaledTo(irradiance_blend_u));
-                    const light_east: u32 = irradiancePack(irradiance.light[1].scaledTo(irradiance_blend_u));
-                    const light_south: u32 = irradiancePack(irradiance.light[2].scaledTo(irradiance_blend_u));
-                    const light_north: u32 = irradiancePack(irradiance.light[3].scaledTo(irradiance_blend_u));
-                    const light_down: u32 = irradiancePack(irradiance.light[4].scaledTo(irradiance_blend_u));
-                    const light_up: u32 = irradiancePack(irradiance.light[5].scaledTo(irradiance_blend_u));
+                        // var west_alpha: f32 = math.clampf(-1, -light_normal.x() * light_coefficient, 1);
+                        // var east_alpha: f32 = math.clampf(-1, light_normal.x() * light_coefficient, 1);
+                        // var south_alpha: f32 = math.clampf(-1, -light_normal.y() * light_coefficient, 1);
+                        // var north_alpha: f32 = math.clampf(-1, light_normal.y() * light_coefficient, 1);
+                        // var down_alpha: f32 = math.clampf(-1, -light_normal.z() * light_coefficient, 1);
+                        // var up_alpha: f32 = math.clampf(-1, light_normal.z() * light_coefficient, 1);
 
-                    commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                        light_west;
-                    commands.light_index_voxel[east][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                        light_east;
-                    commands.light_index_voxel[south][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                        light_south;
-                    commands.light_index_voxel[north][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                        light_north;
-                    commands.light_index_voxel[up][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                        light_up;
-                    commands.light_index_voxel[down][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                        light_down;
+                        // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+                        // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+                        var west_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+                        var east_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+                        var south_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+                        var north_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+                        var down_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+                        var up_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+
+                        // west_alpha = 0;
+                        east_alpha = 0;
+                        south_alpha = 0;
+                        north_alpha = 0;
+                        down_alpha = 0;
+                        up_alpha = 0;
+
+                        if (false) {
+                            const total_alpha: f32 =
+                                west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
+                            const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
+                            west_alpha *= inverse_total_alpha;
+                            east_alpha *= inverse_total_alpha;
+                            south_alpha *= inverse_total_alpha;
+                            north_alpha *= inverse_total_alpha;
+                            down_alpha *= inverse_total_alpha;
+                            up_alpha *= inverse_total_alpha;
+                        }
+
+                        const light_west: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * west_alpha).scaledTo(255).packColorBGRA();
+                        const light_east: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * east_alpha).scaledTo(255).packColorBGRA();
+
+                        // const light_south: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * south_alpha).scaledTo(255).packColorBGRA();
+                        // const light_north: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * north_alpha).scaledTo(255).packColorBGRA();
+
+                        const light_down: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * down_alpha).scaledTo(255).packColorBGRA();
+                        const light_up: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * up_alpha).scaledTo(255).packColorBGRA();
+
+                        const light_south: u32 = Color.new(
+                            math.clampf01(-light_normal.x()),
+                            math.clampf01(-light_normal.y()),
+                            math.clampf01(-light_normal.z()),
+                            0,
+                        ).scaledTo(255).packColorBGRA();
+                        const light_north: u32 = Color.new(
+                            math.clampf01(light_normal.x()),
+                            math.clampf01(light_normal.y()),
+                            math.clampf01(light_normal.z()),
+                            0,
+                        ).scaledTo(255).packColorBGRA();
+
+                        if (false) {
+                            if (@mod(x, 2) == 0) {
+                                light_west |= 0x00ff0000;
+                            }
+                            if (@mod(y, 2) == 0) {
+                                light_east |= 0x0000ff00;
+                            }
+                            if (@mod(x, 2) == 0) {
+                                light_down |= 0x000000ff;
+                            }
+
+                            if (x == (voxel_dimension - 1)) {
+                                light_west |= 0x0000ffff;
+                            }
+                            if (y == (voxel_dimension - 1)) {
+                                light_east |= 0x0000ffff;
+                            }
+                            if (z == (voxel_dimension - 1)) {
+                                light_down |= 0x0000ffff;
+                            }
+                        }
+
+                        commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                            light_west;
+                        commands.light_index_voxel[east][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                            light_east;
+                        commands.light_index_voxel[south][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                            light_south;
+                        commands.light_index_voxel[north][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                            light_north;
+                        commands.light_index_voxel[up][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                            light_up;
+                        commands.light_index_voxel[down][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                            light_down;
+                    } else {
+                        const probe_index: u16 = probe_index_pointer[0];
+
+                        if (probe_index != 0) {
+                            probe_index_pointer[0] = 0;
+
+                            const irradiance: *LightProbeIrradiance = &probe_irradiance[probe_index];
+                            var light_west: u32 = irradiancePack(irradiance.light[0].scaledTo(irradiance_blend_u));
+                            var light_east: u32 = irradiancePack(irradiance.light[1].scaledTo(irradiance_blend_u));
+                            var light_south: u32 = irradiancePack(irradiance.light[2].scaledTo(irradiance_blend_u));
+                            var light_north: u32 = irradiancePack(irradiance.light[3].scaledTo(irradiance_blend_u));
+                            var light_down: u32 = irradiancePack(irradiance.light[4].scaledTo(irradiance_blend_u));
+                            var light_up: u32 = irradiancePack(irradiance.light[5].scaledTo(irradiance_blend_u));
+
+                            if (false) {
+                                var light_override: u32 = 0x10000000;
+
+                                if (@mod(x, 2) == 0) {
+                                    light_override |= 0x00ff0000;
+                                }
+                                if (@mod(y, 2) == 0) {
+                                    light_override |= 0x0000ff00;
+                                }
+                                if (@mod(x, 2) == 0) {
+                                    light_override |= 0x000000ff;
+                                }
+
+                                light_west = light_override;
+                                light_east = light_override;
+                                light_south = light_override;
+                                light_north = light_override;
+                                light_down = light_override;
+                                light_up = light_override;
+                            }
+
+                            commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                                light_west;
+                            commands.light_index_voxel[east][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                                light_east;
+                            commands.light_index_voxel[south][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                                light_south;
+                            commands.light_index_voxel[north][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                                light_north;
+                            commands.light_index_voxel[up][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                                light_up;
+                            commands.light_index_voxel[down][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
+                                light_down;
+                        }
+                        probe_index_pointer += 1;
+                    }
                 }
             }
         }

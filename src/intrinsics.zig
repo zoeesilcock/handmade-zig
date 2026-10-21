@@ -33,7 +33,9 @@ pub fn roundReal32ToInt32(value: f32) i32 {
 }
 
 pub fn roundReal32ToUInt32(value: f32) u32 {
-    return @intFromFloat(@round(value));
+    // return @intFromFloat(@round(value));
+    const signed: i32 = @intFromFloat(@round(value));
+    return @bitCast(signed);
 }
 
 pub fn floorReal32ToInt32(value: f32) i32 {

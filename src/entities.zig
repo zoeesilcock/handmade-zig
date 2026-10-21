@@ -787,8 +787,8 @@ pub fn updateAndRenderEntities(
                         entity.light_probe_clear = false;
 
                         if (global_config.Lighting_ShowProbes) {
-                            var color: Color = .new(1, 1, 1, 1);
-                            color = handmade.getDebugColor4(entity.light_probe_index, null);
+                            const color: Color = .new(1, 1, 1, 1);
+                            // color = handmade.getDebugColor4(entity.light_probe_index, null);
                             render_group.pushCube(
                                 render_group.white_texture,
                                 entity.position,

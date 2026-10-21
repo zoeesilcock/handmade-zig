@@ -845,11 +845,12 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  float SpecularCoefficient = SpecularMix;
         \\  float DiffuseCoefficient = 1.0 - SpecularMix;
         \\
-        \\  float LightDirectionCoefficient = clamp((1.0 / 1.7) * (dot(LightNormal, WorldNormal) + 0.7), 0, 1);
+        // \\  float LightDirectionCoefficient = clamp((1.0 / 1.7) * (dot(LightNormal, WorldNormal) + 0.7), 0, 1);
+        \\  float LightDirectionCoefficient = clamp(dot(LightNormal, WorldNormal), 0, 1);
         \\  if (LightDirectionCoefficient > 0)
         \\  {
         \\    float ReflectionCoefficient = clamp(dot(LightNormal, ReflectionNormal), 0.0, 1.0);
-        \\    vec3 LightColor = LightV.rgb * (MAX_LIGHT_INTENSITY * LightV.a);
+        \\    vec3 LightColor = LightV.rgb * (MAX_LIGHT_INTENSITY * clamp(2.0 * LightV.a - 1.004, 0.0, 1.0));
         \\    Result = DiffuseCoefficient * LightDirectionCoefficient * LightColor +
         \\             SpecularCoefficient * ReflectionCoefficient * LightColor;
         \\  }
@@ -879,13 +880,16 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  vec3 LightUpN = vec3(0, 0, 1);
         \\
         \\  vec3 LightData = vec3(0, 0, 0);
-        \\  LightData += GetIrradiance(LightWest, LightWestN, R);
-        \\  LightData += GetIrradiance(LightEast, LightEastN, R);
-        \\  LightData += GetIrradiance(LightSouth, LightSouthN, R);
-        \\  LightData += GetIrradiance(LightNorth, LightNorthN, R);
-        \\  LightData += GetIrradiance(LightDown, LightDownN, R);
-        \\  LightData += GetIrradiance(LightUp, LightUpN, R);
         \\
+        \\  LightWestN = texture(LightSamplerNorth, VoxelUVW).xyz - texture(LightSamplerSouth, VoxelUVW).xyz;
+        \\  LightWestN = normalize(LightWestN);
+        \\  LightData += GetIrradiance(LightWest, LightWestN, R);
+        // \\  LightData += GetIrradiance(LightEast, LightEastN, R);
+        // \\  LightData += GetIrradiance(LightSouth, LightSouthN, R);
+        // \\  LightData += GetIrradiance(LightNorth, LightNorthN, R);
+        // \\  LightData += GetIrradiance(LightDown, LightDownN, R);
+        // \\  LightData += GetIrradiance(LightUp, LightUpN, R);
+        // \\
         \\  return(LightData.rgb);
         \\}
         \\
