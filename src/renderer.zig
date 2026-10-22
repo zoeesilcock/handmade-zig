@@ -51,6 +51,7 @@ const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
 const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
 const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 const MAX_LIGHT_BOX_COUNT = lighting.MAX_LIGHT_BOX_COUNT;
+const LIGHT_DIRECTION_COUNT = lighting.LIGHT_DIRECTION_COUNT;
 
 pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const TEXTURE_ARRAY_DIM = 512.0;
@@ -272,8 +273,9 @@ pub const RenderCommands = extern struct {
     // TODO: Encode light_probe_irradiance as u32s.
     light_probe_irradiance: [*]LightProbeIrradiance, // [max_light_probe_count]
 
-    light_index_voxel_dimension: u32,
-    light_index_voxel: [6][*]u32, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
+    light_voxel_dimension: u32,
+    light_voxel_color: [LIGHT_DIRECTION_COUNT][*]u32, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
+    light_voxel_normal: [LIGHT_DIRECTION_COUNT][*]Vector3, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
 
     max_light_occluder_count: u32,
     light_occluder_count: u32,

@@ -150,6 +150,7 @@ pub const GL_RG32I = 0x823B;
 pub const GL_RED_INTEGER = 0x8D94;
 pub const GL_GREEN_INTEGER = 0x8D95;
 pub const GL_BLUE_INTEGER = 0x8D96;
+pub const GL_R11F_G11F_B10F = 0x8C3A;
 
 pub const GL_MULTISAMPLE = 0x809D;
 pub const GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
@@ -211,6 +212,7 @@ const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 const DEPTH_COMPONENT_BYTES_PER_SAMPLE = 4;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
+const LIGHT_DIRECTION_COUNT = lighting.LIGHT_DIRECTION_COUNT;
 
 const PlatformRenderer = renderer.PlatformRenderer;
 const RenderCommands = renderer.RenderCommands;
@@ -406,9 +408,13 @@ pub const OpenGL = extern struct {
 
     light_probe_irradiance: [MAX_LIGHT_PROBE_COUNT]renderer.LightProbeIrradiance = undefined,
     light_probe_position: [MAX_LIGHT_PROBE_COUNT]Vector3 = undefined,
-    light_data: [6][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]u32 = undefined,
     light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
-    light_data_handle: [6]u32 = @splat(0),
+
+    light_data_normal: [LIGHT_DIRECTION_COUNT][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]Vector3 = undefined,
+    light_data_color: [LIGHT_DIRECTION_COUNT][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]u32 = undefined,
+
+    light_data_handle_normal: [LIGHT_DIRECTION_COUNT]u32 = @splat(0),
+    light_data_handle_color: [LIGHT_DIRECTION_COUNT]u32 = @splat(0),
 
     // light_buffer_count: u32 = 0,
     // light_buffers: [12]LightBuffer = undefined,
@@ -636,10 +642,31 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    gl.glGenTextures(open_gl.light_data.len, @ptrCast(&open_gl.light_data_handle));
+    gl.glGenTextures(LIGHT_DIRECTION_COUNT, @ptrCast(&open_gl.light_data_handle_normal));
+    gl.glGenTextures(LIGHT_DIRECTION_COUNT, @ptrCast(&open_gl.light_data_handle_color));
     var voxel_index: u32 = 0;
-    while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
-        const handle: u32 = open_gl.light_data_handle[voxel_index];
+    while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
+        var handle: u32 = open_gl.light_data_handle_normal[voxel_index];
+        gl.glBindTexture(GL_TEXTURE_3D, handle);
+        platform.optGLTexImage3D.?(
+            GL_TEXTURE_3D,
+            0,
+            GL_R11F_G11F_B10F,
+            LIGHT_LOOKUP_VOXEL_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM,
+            0,
+            GL.GL_RGB,
+            GL.GL_FLOAT,
+            null,
+        );
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+        handle = open_gl.light_data_handle_color[voxel_index];
         gl.glBindTexture(GL_TEXTURE_3D, handle);
         platform.optGLTexImage3D.?(
             GL_TEXTURE_3D,
@@ -820,12 +847,14 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\uniform vec3 VoxelMinCorner;
         \\uniform vec3 VoxelInverseTotalDimension;
         \\
-        \\uniform sampler3D LightSamplerWest;
-        \\uniform sampler3D LightSamplerEast;
-        \\uniform sampler3D LightSamplerSouth;
-        \\uniform sampler3D LightSamplerNorth;
-        \\uniform sampler3D LightSamplerDown;
-        \\uniform sampler3D LightSamplerUp;
+        \\uniform sampler3D LightSamplerN0;
+        \\uniform sampler3D LightSamplerC0;
+        \\uniform sampler3D LightSamplerN1;
+        \\uniform sampler3D LightSamplerC1;
+        \\uniform sampler3D LightSamplerN2;
+        \\uniform sampler3D LightSamplerC2;
+        \\uniform sampler3D LightSamplerN3;
+        \\uniform sampler3D LightSamplerC3;
         \\
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
@@ -837,9 +866,10 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\out vec4 BlendUnitColor;
         \\
-        \\vec3 GetIrradiance(vec4 LightV, vec3 LightNormal, vec3 ReflectionNormal)
+        \\vec3 GetIrradiance(vec4 LightV, vec3 LightNormalEncoded, vec3 ReflectionNormal)
         \\{
         \\  vec3 Result = vec3(0, 0, 0);
+        \\  vec3 LightNormal = 2.0 * LightNormalEncoded - vec3(1.0, 1.0, 1.0);
         \\
         \\  float SpecularMix = 0.5;
         \\  float SpecularCoefficient = SpecularMix;
@@ -866,30 +896,20 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  vec3 VoxelRelativePosition = WorldPosition - VoxelMinCorner;
         \\  vec3 VoxelUVW = VoxelInverseTotalDimension * VoxelRelativePosition;
         \\
-        \\  vec4 LightWest = texture(LightSamplerWest, VoxelUVW);
-        \\  vec3 LightWestN = vec3(-1, 0, 0);
-        \\  vec4 LightEast = texture(LightSamplerEast, VoxelUVW);
-        \\  vec3 LightEastN = vec3(1, 0, 0);
-        \\  vec4 LightSouth = texture(LightSamplerSouth, VoxelUVW);
-        \\  vec3 LightSouthN = vec3(0, -1, 0);
-        \\  vec4 LightNorth = texture(LightSamplerNorth, VoxelUVW);
-        \\  vec3 LightNorthN = vec3(0, 1, 0);
-        \\  vec4 LightDown = texture(LightSamplerDown, VoxelUVW);
-        \\  vec3 LightDownN = vec3(0, 0, -1);
-        \\  vec4 LightUp = texture(LightSamplerUp, VoxelUVW);
-        \\  vec3 LightUpN = vec3(0, 0, 1);
+        \\  vec3 LightN0 = texture(LightSamplerN0, VoxelUVW).xyz;
+        \\  vec4 LightC0 = texture(LightSamplerC0, VoxelUVW);
+        \\  vec3 LightN1 = texture(LightSamplerN1, VoxelUVW).xyz;
+        \\  vec4 LightC1 = texture(LightSamplerC1, VoxelUVW);
+        \\  vec3 LightN2 = texture(LightSamplerN2, VoxelUVW).xyz;
+        \\  vec4 LightC2 = texture(LightSamplerC2, VoxelUVW);
+        \\  vec3 LightN3 = texture(LightSamplerN3, VoxelUVW).xyz;
+        \\  vec4 LightC3 = texture(LightSamplerC3, VoxelUVW);
         \\
-        \\  vec3 LightData = vec3(0, 0, 0);
+        \\  vec3 LightData = GetIrradiance(LightC0, LightN0, R);
+        \\  LightData += GetIrradiance(LightC1, LightN1, R);
+        \\  LightData += GetIrradiance(LightC2, LightN2, R);
+        \\  LightData += GetIrradiance(LightC3, LightN3, R);
         \\
-        \\  LightWestN = texture(LightSamplerNorth, VoxelUVW).xyz - texture(LightSamplerSouth, VoxelUVW).xyz;
-        \\  LightWestN = normalize(LightWestN);
-        \\  LightData += GetIrradiance(LightWest, LightWestN, R);
-        // \\  LightData += GetIrradiance(LightEast, LightEastN, R);
-        // \\  LightData += GetIrradiance(LightSouth, LightSouthN, R);
-        // \\  LightData += GetIrradiance(LightNorth, LightNorthN, R);
-        // \\  LightData += GetIrradiance(LightDown, LightDownN, R);
-        // \\  LightData += GetIrradiance(LightUp, LightUpN, R);
-        // \\
         \\  return(LightData.rgb);
         \\}
         \\
@@ -953,12 +973,14 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         &.{
             "TextureSampler",
             "DepthSampler",
-            "LightSamplerWest",
-            "LightSamplerEast",
-            "LightSamplerSouth",
-            "LightSamplerNorth",
-            "LightSamplerDown",
-            "LightSamplerUp",
+            "LightSamplerN0",
+            "LightSamplerC0",
+            "LightSamplerN1",
+            "LightSamplerC1",
+            "LightSamplerN2",
+            "LightSamplerC2",
+            "LightSamplerN3",
+            "LightSamplerC3",
         },
     );
 
@@ -1923,13 +1945,12 @@ pub fn beginFrame(
     commands.light_probe_irradiance = &open_gl.light_probe_irradiance;
     commands.light_probe_position = &open_gl.light_probe_position;
 
-    commands.light_index_voxel_dimension = LIGHT_LOOKUP_VOXEL_DIM;
-    commands.light_index_voxel[0] = &open_gl.light_data[0];
-    commands.light_index_voxel[1] = &open_gl.light_data[1];
-    commands.light_index_voxel[2] = &open_gl.light_data[2];
-    commands.light_index_voxel[3] = &open_gl.light_data[3];
-    commands.light_index_voxel[4] = &open_gl.light_data[4];
-    commands.light_index_voxel[5] = &open_gl.light_data[5];
+    commands.light_voxel_dimension = LIGHT_LOOKUP_VOXEL_DIM;
+    var index: u32 = 0;
+    while (index < LIGHT_DIRECTION_COUNT) : (index += 1) {
+        commands.light_voxel_normal[index] = &open_gl.light_data_normal[index];
+        commands.light_voxel_color[index] = &open_gl.light_data_color[index];
+    }
 
     commands.max_light_occluder_count = MAX_LIGHT_OCCLUDER_COUNT;
     commands.light_occluder_count = 0;
@@ -1982,8 +2003,23 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
     {
         var voxel_index: u32 = 0;
-        while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
-            gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle[voxel_index]);
+        while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
+            gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_normal[voxel_index]);
+            platform.optGLTexSubImage3D.?(
+                GL_TEXTURE_3D,
+                0,
+                0,
+                0,
+                0,
+                LIGHT_LOOKUP_VOXEL_DIM,
+                LIGHT_LOOKUP_VOXEL_DIM,
+                LIGHT_LOOKUP_VOXEL_DIM,
+                GL.GL_RGB,
+                GL.GL_FLOAT,
+                &open_gl.light_data_normal[voxel_index],
+            );
+
+            gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_color[voxel_index]);
             platform.optGLTexSubImage3D.?(
                 GL_TEXTURE_3D,
                 0,
@@ -1995,7 +2031,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 LIGHT_LOOKUP_VOXEL_DIM,
                 GL.GL_BGRA_EXT,
                 GL.GL_UNSIGNED_BYTE,
-                &open_gl.light_data[voxel_index],
+                &open_gl.light_data_color[voxel_index],
             );
         }
     }
@@ -2157,9 +2193,12 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 }
 
                 var voxel_index: u32 = 0;
-                while (voxel_index < open_gl.light_data.len) : (voxel_index += 1) {
-                    platform.optGLActiveTexture.?(GL_TEXTURE2 + voxel_index);
-                    gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle[voxel_index]);
+                while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
+                    platform.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index);
+                    gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_normal[voxel_index]);
+
+                    platform.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index + 1);
+                    gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_color[voxel_index]);
                 }
 
                 platform.optGLActiveTexture.?(GL_TEXTURE0);

@@ -48,12 +48,16 @@ pub const LIGHT_TEST_ACCUMULATION_COUNT = 1024;
 pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
 pub const MAX_LIGHT_BOX_COUNT = 2 * 8192;
+pub const LIGHT_DIRECTION_COUNT = 4;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
-pub const LIGHT_LOOKUP_VOXEL_DIM_POW_2 = 5;
+pub const LIGHT_LOOKUP_VOXEL_DIM_POW_2 = 4;
 pub const LIGHT_LOOKUP_VOXEL_DIM = (1 << LIGHT_LOOKUP_VOXEL_DIM_POW_2);
 pub const MAX_LIGHT_PROBE_COUNT = 2 * 8192;
 pub const MAX_LIGHT_OCCLUDER_COUNT = 2 * 8192;
 pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
+const TEST_LIGHT_SPHERE = true;
+const TEST_LIGHT_CHECKERBOARD = false;
+const TEST_LIGHT_PROBES = false;
 
 const SLOW = shared.SLOW;
 
@@ -820,6 +824,11 @@ fn irradiancePack(light_intensity: Color3) u32 {
     return result;
 }
 
+fn binormalToNormal(normal: Vector3) Vector3 {
+    const result: Vector3 = normal.scaledTo(0.5).plus(.splat(0.5));
+    return result;
+}
+
 pub fn beginLightingComputation(
     solution: *LightingSolution,
     group: *RenderGroup,
@@ -833,7 +842,7 @@ pub fn beginLightingComputation(
 
         group.enableLighting(light_bounds);
 
-        const cell_count: u32 = group.commands.light_index_voxel_dimension;
+        const cell_count: u32 = group.commands.light_voxel_dimension;
         const inverse_cell_count: Vector3 = Vector3.newU(cell_count, cell_count, cell_count).divideFByMe(1);
 
         solution.spatial_probe_index.min_corner = light_bounds.min;
@@ -853,7 +862,7 @@ pub fn endLightingComputation(
 
     const setup: *RenderSetup = &group.last_setup;
     const commands: *RenderCommands = group.commands;
-    const voxel_dimension: u32 = commands.light_index_voxel_dimension;
+    const voxel_dimension: u32 = commands.light_voxel_dimension;
 
     solution.light_probe_count = commands.light_probe_count;
     solution.light_probe_position = commands.light_probe_position;
@@ -955,16 +964,19 @@ pub fn endLightingComputation(
         const inverse_voxel_dimension: Vector3 =
             Vector3.newU(voxel_dimension, voxel_dimension, voxel_dimension).divideFByMe(1);
 
-        const west: u32 = @backingInt(box_mod.BoxSurfaceIndex.West);
-        const east: u32 = @backingInt(box_mod.BoxSurfaceIndex.East);
-        const south: u32 = @backingInt(box_mod.BoxSurfaceIndex.South);
-        const north: u32 = @backingInt(box_mod.BoxSurfaceIndex.North);
-        const up: u32 = @backingInt(box_mod.BoxSurfaceIndex.Up);
-        const down: u32 = @backingInt(box_mod.BoxSurfaceIndex.Down);
-
         const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
+
+        const light_position2: Vector3 = light_position.plus(.new(0, 8, 0));
+        const light_position3: Vector3 = light_position.plus(.new(8, 0, 0));
+        const light_position4: Vector3 = light_position.plus(.new(8, 8, 0));
         const light_uvw: Vector3 =
             voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
+        const light2_uvw: Vector3 =
+            voxel_inverse_total_dimension.hadamardProduct(light_position2.minus(setup.voxel_min_corner));
+        const light3_uvw: Vector3 =
+            voxel_inverse_total_dimension.hadamardProduct(light_position3.minus(setup.voxel_min_corner));
+        const light4_uvw: Vector3 =
+            voxel_inverse_total_dimension.hadamardProduct(light_position4.minus(setup.voxel_min_corner));
 
         var probe_index_pointer: [*]u16 = solution.spatial_probe_index.light_index;
         var z: u32 = 0;
@@ -973,120 +985,108 @@ pub fn endLightingComputation(
             while (y < voxel_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < voxel_dimension) : (x += 1) {
-                    if (true) {
+                    var light_normal0: Vector3 = .zero();
+                    var light_color0: u32 = 0;
+                    var light_normal1: Vector3 = .zero();
+                    var light_color1: u32 = 0;
+                    var light_normal2: Vector3 = .zero();
+                    var light_color2: u32 = 0;
+                    var light_normal3: Vector3 = .zero();
+                    var light_color3: u32 = 0;
+
+                    if (TEST_LIGHT_SPHERE) {
                         const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
                         const voxel_uvw: Vector3 = inverse_voxel_dimension.hadamardProduct(voxel_center_position);
-                        var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
-                        const light_distance: f32 = light_normal.length();
-                        light_normal = light_uvw.minus(voxel_uvw).normalizeOrZero();
 
-                        var light_coefficient: f32 = 1.0 - 3.0 * light_distance;
-                        light_coefficient *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
+                        {
+                            var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
+                            const light_distance: f32 = light_normal.length();
+                            light_normal = light_normal.normalizeOrZero();
 
-                        // var west_alpha: f32 = math.clampf(-1, -light_normal.x() * light_coefficient, 1);
-                        // var east_alpha: f32 = math.clampf(-1, light_normal.x() * light_coefficient, 1);
-                        // var south_alpha: f32 = math.clampf(-1, -light_normal.y() * light_coefficient, 1);
-                        // var north_alpha: f32 = math.clampf(-1, light_normal.y() * light_coefficient, 1);
-                        // var down_alpha: f32 = math.clampf(-1, -light_normal.z() * light_coefficient, 1);
-                        // var up_alpha: f32 = math.clampf(-1, light_normal.z() * light_coefficient, 1);
+                            var light_coefficient: f32 = 1.0 - 3.0 * light_distance;
+                            light_coefficient *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
 
-                        // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
-                        // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
-                        var west_alpha: f32 = math.clampf(-1, light_coefficient, 1);
-                        var east_alpha: f32 = math.clampf(-1, light_coefficient, 1);
-                        var south_alpha: f32 = math.clampf(-1, light_coefficient, 1);
-                        var north_alpha: f32 = math.clampf(-1, light_coefficient, 1);
-                        var down_alpha: f32 = math.clampf(-1, light_coefficient, 1);
-                        var up_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+                            // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+                            // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+                            const light_alpha: f32 = math.clampf(-1, light_coefficient, 1);
 
-                        // west_alpha = 0;
-                        east_alpha = 0;
-                        south_alpha = 0;
-                        north_alpha = 0;
-                        down_alpha = 0;
-                        up_alpha = 0;
-
-                        if (false) {
-                            const total_alpha: f32 =
-                                west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
-                            const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
-                            west_alpha *= inverse_total_alpha;
-                            east_alpha *= inverse_total_alpha;
-                            south_alpha *= inverse_total_alpha;
-                            north_alpha *= inverse_total_alpha;
-                            down_alpha *= inverse_total_alpha;
-                            up_alpha *= inverse_total_alpha;
+                            light_normal0 = light_normal;
+                            light_color0 = Color.new(1, 1, 1, 0.5 + 0.5 * light_alpha).scaledTo(255).packColorBGRA();
                         }
 
-                        const light_west: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * west_alpha).scaledTo(255).packColorBGRA();
-                        const light_east: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * east_alpha).scaledTo(255).packColorBGRA();
+                        {
+                            var light_normal: Vector3 = light2_uvw.minus(voxel_uvw);
+                            const light_distance: f32 = light_normal.length();
+                            light_normal = light_normal.normalizeOrZero();
 
-                        // const light_south: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * south_alpha).scaledTo(255).packColorBGRA();
-                        // const light_north: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * north_alpha).scaledTo(255).packColorBGRA();
+                            var light_coefficient: f32 = 1.0 - 3.0 * light_distance;
+                            light_coefficient *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
 
-                        const light_down: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * down_alpha).scaledTo(255).packColorBGRA();
-                        const light_up: u32 = Color.new(1, 1, 1, 0.5 + 0.5 * up_alpha).scaledTo(255).packColorBGRA();
+                            // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+                            // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+                            const light_alpha: f32 = math.clampf(-1, light_coefficient, 1);
 
-                        const light_south: u32 = Color.new(
-                            math.clampf01(-light_normal.x()),
-                            math.clampf01(-light_normal.y()),
-                            math.clampf01(-light_normal.z()),
-                            0,
-                        ).scaledTo(255).packColorBGRA();
-                        const light_north: u32 = Color.new(
-                            math.clampf01(light_normal.x()),
-                            math.clampf01(light_normal.y()),
-                            math.clampf01(light_normal.z()),
-                            0,
-                        ).scaledTo(255).packColorBGRA();
-
-                        if (false) {
-                            if (@mod(x, 2) == 0) {
-                                light_west |= 0x00ff0000;
-                            }
-                            if (@mod(y, 2) == 0) {
-                                light_east |= 0x0000ff00;
-                            }
-                            if (@mod(x, 2) == 0) {
-                                light_down |= 0x000000ff;
-                            }
-
-                            if (x == (voxel_dimension - 1)) {
-                                light_west |= 0x0000ffff;
-                            }
-                            if (y == (voxel_dimension - 1)) {
-                                light_east |= 0x0000ffff;
-                            }
-                            if (z == (voxel_dimension - 1)) {
-                                light_down |= 0x0000ffff;
-                            }
+                            light_normal1 = light_normal;
+                            light_color1 = Color.new(1, 0, 0, 0.5 + 0.5 * light_alpha).scaledTo(255).packColorBGRA();
                         }
 
-                        commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                            light_west;
-                        commands.light_index_voxel[east][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                            light_east;
-                        commands.light_index_voxel[south][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                            light_south;
-                        commands.light_index_voxel[north][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                            light_north;
-                        commands.light_index_voxel[up][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                            light_up;
-                        commands.light_index_voxel[down][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                            light_down;
-                    } else {
+                        {
+                            var light_normal: Vector3 = light3_uvw.minus(voxel_uvw);
+                            const light_distance: f32 = light_normal.length();
+                            light_normal = light_normal.normalizeOrZero();
+
+                            var light_coefficient: f32 = 1.0 - 3.0 * light_distance;
+                            light_coefficient *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
+
+                            // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+                            // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+                            const light_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+
+                            light_normal2 = light_normal;
+                            light_color2 = Color.new(0, 1, 0, 0.5 + 0.5 * light_alpha).scaledTo(255).packColorBGRA();
+                        }
+
+                        {
+                            var light_normal: Vector3 = light4_uvw.minus(voxel_uvw);
+                            const light_distance: f32 = light_normal.length();
+                            light_normal = light_normal.normalizeOrZero();
+
+                            var light_coefficient: f32 = 1.0 - 3.0 * light_distance;
+                            light_coefficient *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
+
+                            // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+                            // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+                            const light_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+
+                            light_normal3 = light_normal;
+                            light_color3 = Color.new(0, 0, 1, 0.5 + 0.5 * light_alpha).scaledTo(255).packColorBGRA();
+                        }
+                    }
+
+                    if (TEST_LIGHT_CHECKERBOARD) {
+                        light_normal0 = .new(0, 0, 1);
+                        light_color0 = 0xa0000000;
+
+                        if (@mod(x, 2) == 0) {
+                            light_color0 |= 0x00ff0000;
+                        }
+                        if (@mod(y, 2) == 0) {
+                            light_color0 |= 0x0000ff00;
+                        }
+                        if (@mod(x, 2) == 0) {
+                            light_color0 |= 0x000000ff;
+                        }
+                    }
+
+                    if (TEST_LIGHT_PROBES) {
+                        light_normal0 = .new(0, 0, 1);
                         const probe_index: u16 = probe_index_pointer[0];
 
                         if (probe_index != 0) {
                             probe_index_pointer[0] = 0;
 
                             const irradiance: *LightProbeIrradiance = &probe_irradiance[probe_index];
-                            var light_west: u32 = irradiancePack(irradiance.light[0].scaledTo(irradiance_blend_u));
-                            var light_east: u32 = irradiancePack(irradiance.light[1].scaledTo(irradiance_blend_u));
-                            var light_south: u32 = irradiancePack(irradiance.light[2].scaledTo(irradiance_blend_u));
-                            var light_north: u32 = irradiancePack(irradiance.light[3].scaledTo(irradiance_blend_u));
-                            var light_down: u32 = irradiancePack(irradiance.light[4].scaledTo(irradiance_blend_u));
-                            var light_up: u32 = irradiancePack(irradiance.light[5].scaledTo(irradiance_blend_u));
+                            light_color0 = irradiancePack(irradiance.light[0].scaledTo(irradiance_blend_u));
 
                             if (false) {
                                 var light_override: u32 = 0x10000000;
@@ -1101,29 +1101,24 @@ pub fn endLightingComputation(
                                     light_override |= 0x000000ff;
                                 }
 
-                                light_west = light_override;
-                                light_east = light_override;
-                                light_south = light_override;
-                                light_north = light_override;
-                                light_down = light_override;
-                                light_up = light_override;
+                                light_color0 = light_override;
                             }
-
-                            commands.light_index_voxel[west][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                                light_west;
-                            commands.light_index_voxel[east][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                                light_east;
-                            commands.light_index_voxel[south][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                                light_south;
-                            commands.light_index_voxel[north][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                                light_north;
-                            commands.light_index_voxel[up][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                                light_up;
-                            commands.light_index_voxel[down][z * voxel_dimension * voxel_dimension + y * voxel_dimension + x] =
-                                light_down;
                         }
                         probe_index_pointer += 1;
                     }
+
+                    const element_index: u32 = z * voxel_dimension * voxel_dimension + y * voxel_dimension + x;
+                    commands.light_voxel_normal[0][element_index] = binormalToNormal(light_normal0);
+                    commands.light_voxel_color[0][element_index] = light_color0;
+
+                    commands.light_voxel_normal[1][element_index] = binormalToNormal(light_normal1);
+                    commands.light_voxel_color[1][element_index] = light_color1;
+
+                    commands.light_voxel_normal[2][element_index] = binormalToNormal(light_normal2);
+                    commands.light_voxel_color[2][element_index] = light_color2;
+
+                    commands.light_voxel_normal[3][element_index] = binormalToNormal(light_normal3);
+                    commands.light_voxel_color[3][element_index] = light_color3;
                 }
             }
         }
