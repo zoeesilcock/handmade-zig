@@ -175,6 +175,14 @@ fn Vector3Type(comptime ScalarType: type) type {
             } };
         }
 
+        pub fn fromV3u(self: Vector3u) Vector3 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+                @floatFromInt(self.z()),
+            );
+        }
+
         pub fn x(self: *const Self) ScalarType {
             return self.values[0];
         }

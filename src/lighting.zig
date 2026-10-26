@@ -6,6 +6,7 @@ const simd = @import("simd.zig");
 const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const asset = @import("asset.zig");
+const world = @import("world.zig");
 const intrinsics = @import("intrinsics.zig");
 const random = @import("random.zig");
 const handmade = @import("handmade.zig");
@@ -20,6 +21,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Vector3i = math.Vector3i;
+const Vector3u = math.Vector3u;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const Color3 = math.Color3;
@@ -37,6 +39,7 @@ const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 const LightSamplingSphere = sampling_spheres.LightSamplingSphere;
+const WorldPosition = world.WorldPosition;
 
 const LIGHT_SAMPLING_SPHERE_COUNT = sampling_spheres.LIGHT_SAMPLING_SPHERE_COUNT;
 const LIGHT_SAMPLING_SPHERE_MASK = sampling_spheres.LIGHT_SAMPLING_SPHERE_MASK;
@@ -52,80 +55,82 @@ pub const LIGHT_DIRECTION_COUNT = 4;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
 pub const LIGHT_LOOKUP_VOXEL_DIM_POW_2 = 4;
 pub const LIGHT_LOOKUP_VOXEL_DIM = (1 << LIGHT_LOOKUP_VOXEL_DIM_POW_2);
+pub const LIGHT_LARGE_VOXEL_DIM_POW_2 = LIGHT_LOOKUP_VOXEL_DIM_POW_2 + 2;
+pub const LIGHT_LARGE_VOXEL_DIM = (1 << LIGHT_LARGE_VOXEL_DIM_POW_2);
 pub const MAX_LIGHT_PROBE_COUNT = 2 * 8192;
 pub const MAX_LIGHT_OCCLUDER_COUNT = 2 * 8192;
 pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
-const TEST_LIGHT_SPHERE = true;
+const TEST_LIGHT_SPHERE = false;
 const TEST_LIGHT_CHECKERBOARD = false;
-const TEST_LIGHT_PROBES = false;
+const TEST_LIGHT_TRANSFER = true;
 
 const SLOW = shared.SLOW;
 
-const SpatialIndexMapping = extern struct {
-    cell_coord: Vector3i = .zero(),
-    uvw: Vector3 = .zero(),
-};
-
-const LightProbeSpatialIndex = extern struct {
-    min_corner: Vector3,
-    cell_dimension: Vector3,
-    inverse_cell_dimension: Vector3,
-    dimension_power_of_2: Vector3i,
-    total_cell_count: u32,
-    light_index: [*]u16,
-
-    fn mapIntoGrid(self: *LightProbeSpatialIndex, position: Vector3) SpatialIndexMapping {
-        var result: SpatialIndexMapping = .{};
-        var f_coord: Vector3 = self.inverse_cell_dimension.hadamardProduct(position.minus(self.min_corner));
-        result.cell_coord = f_coord.f32ToI32();
-
-        // Doing this here makes it well-bounded, but it gives incorrect results for queries outside the grid.
-        result.uvw = f_coord.minus(result.cell_coord.i32ToF32());
-
-        _ = result.cell_coord.setX(math.clampi32(
-            0,
-            result.cell_coord.x(),
-            (@as(i32, 1) << @intCast(self.dimension_power_of_2.x())) - 1,
-        ));
-        _ = result.cell_coord.setY(math.clampi32(
-            0,
-            result.cell_coord.y(),
-            (@as(i32, 1) << @intCast(self.dimension_power_of_2.y())) - 1,
-        ));
-        _ = result.cell_coord.setZ(math.clampi32(
-            0,
-            result.cell_coord.z(),
-            (@as(i32, 1) << @intCast(self.dimension_power_of_2.z())) - 1,
-        ));
-
-        return result;
-    }
-
-    fn getSpatialIndexAddress(self: *LightProbeSpatialIndex, cell_coord: Vector3i) u32 {
-        const index: u32 =
-            @as(u32, @intCast((((cell_coord.z() << @as(u5, @intCast(self.dimension_power_of_2.y()))) | cell_coord.y()) <<
-                @as(u5, @intCast(self.dimension_power_of_2.x()))) | @as(i32, @intCast(cell_coord.x()))));
-
-        return index;
-    }
-
-    fn getCornerLightIndex(self: *LightProbeSpatialIndex, cell_coord: Vector3i) *u16 {
-        const index: u32 = self.getSpatialIndexAddress(cell_coord);
-        std.debug.assert(index < (@as(u32, 1) << @intCast(self.dimension_power_of_2.x() + self.dimension_power_of_2.y() + self.dimension_power_of_2.z())));
-        const result: *u16 = &self.light_index[index];
-        return result;
-    }
-
-    fn getMinCorner(self: *LightProbeSpatialIndex, cell_coord: Vector3i) Vector3 {
-        return self.min_corner.plus(cell_coord.i32ToF32().hadamardProduct(self.cell_dimension));
-    }
-
-    fn getCenter(self: *LightProbeSpatialIndex, cell_coord: Vector3i) Vector3 {
-        return self.min_corner.plus(
-            cell_coord.i32ToF32().plus(.new(0.5, 0.5, 0.5)).hadamardProduct(self.cell_dimension),
-        );
-    }
-};
+// const SpatialIndexMapping = extern struct {
+//     cell_coord: Vector3i = .zero(),
+//     uvw: Vector3 = .zero(),
+// };
+//
+// const LightProbeSpatialIndex = extern struct {
+//     min_corner: Vector3,
+//     cell_dimension: Vector3,
+//     inverse_cell_dimension: Vector3,
+//     dimension_power_of_2: Vector3i,
+//     total_cell_count: u32,
+//     light_index: [*]u16,
+//
+//     fn mapIntoGrid(self: *LightProbeSpatialIndex, position: Vector3) SpatialIndexMapping {
+//         var result: SpatialIndexMapping = .{};
+//         var f_coord: Vector3 = self.inverse_cell_dimension.hadamardProduct(position.minus(self.min_corner));
+//         result.cell_coord = f_coord.f32ToI32();
+//
+//         // Doing this here makes it well-bounded, but it gives incorrect results for queries outside the grid.
+//         result.uvw = f_coord.minus(result.cell_coord.i32ToF32());
+//
+//         _ = result.cell_coord.setX(math.clampi32(
+//             0,
+//             result.cell_coord.x(),
+//             (@as(i32, 1) << @intCast(self.dimension_power_of_2.x())) - 1,
+//         ));
+//         _ = result.cell_coord.setY(math.clampi32(
+//             0,
+//             result.cell_coord.y(),
+//             (@as(i32, 1) << @intCast(self.dimension_power_of_2.y())) - 1,
+//         ));
+//         _ = result.cell_coord.setZ(math.clampi32(
+//             0,
+//             result.cell_coord.z(),
+//             (@as(i32, 1) << @intCast(self.dimension_power_of_2.z())) - 1,
+//         ));
+//
+//         return result;
+//     }
+//
+//     fn getSpatialIndexAddress(self: *LightProbeSpatialIndex, cell_coord: Vector3i) u32 {
+//         const index: u32 =
+//             @as(u32, @intCast((((cell_coord.z() << @as(u5, @intCast(self.dimension_power_of_2.y()))) | cell_coord.y()) <<
+//                 @as(u5, @intCast(self.dimension_power_of_2.x()))) | @as(i32, @intCast(cell_coord.x()))));
+//
+//         return index;
+//     }
+//
+//     fn getCornerLightIndex(self: *LightProbeSpatialIndex, cell_coord: Vector3i) *u16 {
+//         const index: u32 = self.getSpatialIndexAddress(cell_coord);
+//         std.debug.assert(index < (@as(u32, 1) << @intCast(self.dimension_power_of_2.x() + self.dimension_power_of_2.y() + self.dimension_power_of_2.z())));
+//         const result: *u16 = &self.light_index[index];
+//         return result;
+//     }
+//
+//     fn getMinCorner(self: *LightProbeSpatialIndex, cell_coord: Vector3i) Vector3 {
+//         return self.min_corner.plus(cell_coord.i32ToF32().hadamardProduct(self.cell_dimension));
+//     }
+//
+//     fn getCenter(self: *LightProbeSpatialIndex, cell_coord: Vector3i) Vector3 {
+//         return self.min_corner.plus(
+//             cell_coord.i32ToF32().plus(.new(0.5, 0.5, 0.5)).hadamardProduct(self.cell_dimension),
+//         );
+//     }
+// };
 
 pub fn getLightFromProbe(self: *const LightProbeIrradiance, emission_direction: Vector3) Color3 {
     // TODO: As we try to optimize the lighting, we can definitely make this routine a lot faster. We can probably
@@ -158,6 +163,11 @@ pub fn accumulate(self: *LightProbeIrradiance, contribution: f32, source: *Light
     self.light[4] = self.light[4].plus(source.light[4].scaledTo(contribution));
     self.light[5] = self.light[5].plus(source.light[5].scaledTo(contribution));
 }
+
+const LightVoxelCell = struct {
+    light_color: [LIGHT_DIRECTION_COUNT]Color3,
+    light_normal: [LIGHT_DIRECTION_COUNT]Vector3,
+};
 
 pub const LightingSolution = struct {
     // TODO: We probably want to convert this system to one that actually uses a permanent box array where entities
@@ -193,98 +203,109 @@ pub const LightingSolution = struct {
 
     light_probe_count: u32,
     light_probe_position: [*]Vector3,
-    light_probe_irradiance: [*]LightProbeIrradiance,
-    spatial_probe_index: LightProbeSpatialIndex,
+    // light_probe_irradiance: [*]LightProbeIrradiance,
+    // spatial_probe_index: LightProbeSpatialIndex,
+
+    voxel_min_corner_large: Vector3,
+    voxel_min_corner_hot: Vector3,
+    hot_corner_i: Vector3u,
+
+    voxel_cell_dimension: Vector3,
+    inverse_voxel_cell_dimension: Vector3,
+    hot_x: f32,
+    hot_y: f32,
+    hot_z: f32,
+    cells: [LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM]LightVoxelCell,
 
     debug_light_position: Vector3,
 
-    pub fn addProbeToSpacialIndex(
-        self: *LightingSolution,
-        spatial_index: *LightProbeSpatialIndex,
-        probe_index: u16,
-        probe_position: Vector3,
-        radius: Vector3,
-    ) void {
-        const probe_min_position: Vector3 = probe_position.minus(radius);
-        const probe_max_position: Vector3 = probe_position.plus(radius);
-
-        const min_index: Vector3i = spatial_index.mapIntoGrid(probe_min_position).cell_coord;
-        const max_index: Vector3i = spatial_index.mapIntoGrid(probe_max_position).cell_coord;
-
-        var z: i32 = min_index.z();
-        while (z <= max_index.z()) : (z += 1) {
-            var y: i32 = min_index.y();
-            while (y <= max_index.y()) : (y += 1) {
-                var x: i32 = min_index.x();
-                while (x <= max_index.x()) : (x += 1) {
-                    const cell_coord: Vector3i = .new(x, y, z);
-                    const cell_center: Vector3 = spatial_index.getCenter(cell_coord);
-
-                    // Find out what light is in there to begin with.
-                    const existing_index: *u16 = spatial_index.getCornerLightIndex(cell_coord);
-
-                    // If we're the more appropriate lookup, use us instead of it.
-                    if (existing_index.* == 0) {
-                        existing_index.* = probe_index;
-                    } else {
-                        const existing_probe_position: Vector3 = self.light_probe_position[existing_index.*];
-                        const distance_to_this_sq: f32 = probe_position.minus(cell_center).lengthSquared();
-                        const distance_to_existing_sq: f32 = existing_probe_position.minus(cell_center).lengthSquared();
-                        if (distance_to_existing_sq > distance_to_this_sq) {
-                            existing_index.* = probe_index;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn getProbe(self: *LightingSolution, index: u16) *LightProbeIrradiance {
-        const result: *LightProbeIrradiance = &self.light_probe_irradiance[index];
-        return result;
-    }
-
-    pub fn getProbeFromCell(self: *LightingSolution, cell_position: Vector3i) *LightProbeIrradiance {
-        const result: *LightProbeIrradiance =
-            self.getProbe(self.spatial_probe_index.getCornerLightIndex(cell_position).*);
-        return result;
-    }
-
-    pub fn getProbeLightingForCell(
-        self: *LightingSolution,
-        position: Vector3i,
-        uvw: Vector3,
-    ) LightProbeIrradiance {
-        const p0: *LightProbeIrradiance = self.getProbeFromCell(position);
-        const p1: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 0, 0)));
-        const p2: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 1, 0)));
-        const p3: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 0, 1)));
-        const p4: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 1, 1)));
-        const p5: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 1, 0)));
-        const p6: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 0, 1)));
-        const p7: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 1, 1)));
-
-        var c: LightProbeIrradiance = .{};
-        c.accumulate((1 - uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p0);
-        c.accumulate((uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p1);
-        c.accumulate((1 - uvw.x()) * (uvw.y()) * (1 - uvw.z()), p2);
-        c.accumulate((1 - uvw.x()) * (1 - uvw.y()) * (uvw.z()), p3);
-        c.accumulate((1 - uvw.x()) * (uvw.y()) * (uvw.z()), p4);
-        c.accumulate((uvw.x()) * (uvw.y()) * (1 - uvw.z()), p5);
-        c.accumulate((uvw.x()) * (1 - uvw.y()) * (uvw.z()), p6);
-        c.accumulate((uvw.x()) * (uvw.y()) * (uvw.z()), p7);
-
-        return c;
-    }
-
-    pub fn getProbeLightingForWorldPosition(
-        self: *LightingSolution,
-        spatial_index: *LightProbeSpatialIndex,
-        position: Vector3,
-    ) LightProbeIrradiance {
-        const mapping = spatial_index.mapIntoGrid(position);
-        return self.getProbeLightingForCell(mapping.cell_coord, mapping.uvw);
-    }
+    // pub fn addProbeToSpacialIndex(
+    //     self: *LightingSolution,
+    //     spatial_index: *LightProbeSpatialIndex,
+    //     probe_index: u16,
+    //     probe_position: Vector3,
+    //     radius: Vector3,
+    // ) void {
+    //     const probe_min_position: Vector3 = probe_position.minus(radius);
+    //     const probe_max_position: Vector3 = probe_position.plus(radius);
+    //
+    //     const min_index: Vector3i = spatial_index.mapIntoGrid(probe_min_position).cell_coord;
+    //     const max_index: Vector3i = spatial_index.mapIntoGrid(probe_max_position).cell_coord;
+    //
+    //     var z: i32 = min_index.z();
+    //     while (z <= max_index.z()) : (z += 1) {
+    //         var y: i32 = min_index.y();
+    //         while (y <= max_index.y()) : (y += 1) {
+    //             var x: i32 = min_index.x();
+    //             while (x <= max_index.x()) : (x += 1) {
+    //                 const cell_coord: Vector3i = .new(x, y, z);
+    //                 const cell_center: Vector3 = spatial_index.getCenter(cell_coord);
+    //
+    //                 // Find out what light is in there to begin with.
+    //                 const existing_index: *u16 = spatial_index.getCornerLightIndex(cell_coord);
+    //
+    //                 // If we're the more appropriate lookup, use us instead of it.
+    //                 if (existing_index.* == 0) {
+    //                     existing_index.* = probe_index;
+    //                 } else {
+    //                     const existing_probe_position: Vector3 = self.light_probe_position[existing_index.*];
+    //                     const distance_to_this_sq: f32 = probe_position.minus(cell_center).lengthSquared();
+    //                     const distance_to_existing_sq: f32 = existing_probe_position.minus(cell_center).lengthSquared();
+    //                     if (distance_to_existing_sq > distance_to_this_sq) {
+    //                         existing_index.* = probe_index;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // pub fn getProbe(self: *LightingSolution, index: u16) *LightProbeIrradiance {
+    //     const result: *LightProbeIrradiance = &self.light_probe_irradiance[index];
+    //     return result;
+    // }
+    //
+    // pub fn getProbeFromCell(self: *LightingSolution, cell_position: Vector3i) *LightProbeIrradiance {
+    //     const result: *LightProbeIrradiance =
+    //         self.getProbe(self.spatial_probe_index.getCornerLightIndex(cell_position).*);
+    //     return result;
+    // }
+    //
+    // pub fn getProbeLightingForCell(
+    //     self: *LightingSolution,
+    //     position: Vector3i,
+    //     uvw: Vector3,
+    // ) LightProbeIrradiance {
+    //     const p0: *LightProbeIrradiance = self.getProbeFromCell(position);
+    //     const p1: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 0, 0)));
+    //     const p2: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 1, 0)));
+    //     const p3: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 0, 1)));
+    //     const p4: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(0, 1, 1)));
+    //     const p5: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 1, 0)));
+    //     const p6: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 0, 1)));
+    //     const p7: *LightProbeIrradiance = self.getProbeFromCell(position.plus(.new(1, 1, 1)));
+    //
+    //     var c: LightProbeIrradiance = .{};
+    //     c.accumulate((1 - uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p0);
+    //     c.accumulate((uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p1);
+    //     c.accumulate((1 - uvw.x()) * (uvw.y()) * (1 - uvw.z()), p2);
+    //     c.accumulate((1 - uvw.x()) * (1 - uvw.y()) * (uvw.z()), p3);
+    //     c.accumulate((1 - uvw.x()) * (uvw.y()) * (uvw.z()), p4);
+    //     c.accumulate((uvw.x()) * (uvw.y()) * (1 - uvw.z()), p5);
+    //     c.accumulate((uvw.x()) * (1 - uvw.y()) * (uvw.z()), p6);
+    //     c.accumulate((uvw.x()) * (uvw.y()) * (uvw.z()), p7);
+    //
+    //     return c;
+    // }
+    //
+    // pub fn getProbeLightingForWorldPosition(
+    //     self: *LightingSolution,
+    //     spatial_index: *LightProbeSpatialIndex,
+    //     position: Vector3,
+    // ) LightProbeIrradiance {
+    //     const mapping = spatial_index.mapIntoGrid(position);
+    //     return self.getProbeLightingForCell(mapping.cell_coord, mapping.uvw);
+    // }
 };
 
 const LightingWork = extern struct {
@@ -503,7 +524,6 @@ fn computeLightPropagation(
     defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
 
     const solution: *LightingSolution = work.solution;
-    const spatial_index: *LightProbeSpatialIndex = &solution.spatial_probe_index;
     const first_light_probe_index: u32 = work.first_light_probe_index;
     const one_past_last_light_probe_index: u32 = work.one_past_last_light_probe_index;
 
@@ -559,20 +579,21 @@ fn computeLightPropagation(
                 var transfer_pps: Color3 = .zero();
                 const emission_direction: Vector3 = ray_direction.getComponent(sub_ray).negated();
                 if (hit) {
-                    const probe_sample_position: Vector3 = ray.position.getComponent(sub_ray);
-                    const probe_sample_normal: Vector3 = ray.normal.getComponent(sub_ray);
-                    const sample_reflection_color: Vector3 = ray.reflection_color.getComponent(sub_ray);
-                    const emission: f32 = @as([4]f32, ray.emission)[sub_ray];
+                    unreachable;
+                    // const probe_sample_position: Vector3 = ray.position.getComponent(sub_ray);
+                    // const probe_sample_normal: Vector3 = ray.normal.getComponent(sub_ray);
+                    // const sample_reflection_color: Vector3 = ray.reflection_color.getComponent(sub_ray);
+                    // const emission: f32 = @as([4]f32, ray.emission)[sub_ray];
+                    //
+                    // const reflection_falloff: f32 = math.clampf01(probe_sample_normal.dotProduct(emission_direction));
 
-                    const reflection_falloff: f32 = math.clampf01(probe_sample_normal.dotProduct(emission_direction));
-
-                    const composite_probe: LightProbeIrradiance =
-                        solution.getProbeLightingForWorldPosition(spatial_index, probe_sample_position);
-                    const light_sample: Color3 = getLightFromProbe(composite_probe, probe_sample_normal);
-                    transfer_pps =
-                        light_sample.hadamardProduct(sample_reflection_color.toColor3()).scaledTo(reflection_falloff).plus(
-                            sample_reflection_color.toColor3().scaledTo(emission),
-                        );
+                    // const composite_probe: LightProbeIrradiance =
+                    //     solution.getProbeLightingForWorldPosition(spatial_index, probe_sample_position);
+                    // const light_sample: Color3 = getLightFromProbe(composite_probe, probe_sample_normal);
+                    // transfer_pps =
+                    //     light_sample.hadamardProduct(sample_reflection_color.toColor3()).scaledTo(reflection_falloff).plus(
+                    //         sample_reflection_color.toColor3().scaledTo(emission),
+                    //     );
                 } else {
                     transfer_pps = moon_color.scaledTo(math.clampf01(emission_direction.z()));
                 }
@@ -801,8 +822,6 @@ pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
     solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true), @src());
     solution.accumulated_pps = arena.pushArray(6 * LIGHT_DATA_WIDTH, Color3, .aligned(64, true), @src());
     solution.sampling_spheres = &sampling_spheres.light_sampling_sphere_table;
-    solution.spatial_probe_index.total_cell_count = LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM;
-    solution.spatial_probe_index.light_index = arena.pushArray(solution.spatial_probe_index.total_cell_count, u16, null, @src());
 }
 
 fn irradiancePack(light_intensity: Color3) u32 {
@@ -832,23 +851,32 @@ fn binormalToNormal(normal: Vector3) Vector3 {
 pub fn beginLightingComputation(
     solution: *LightingSolution,
     group: *RenderGroup,
-    light_bounds: Rectangle3,
+    origin_position: WorldPosition,
+    camera_offset_from_origin: Vector3,
     enable_lighting: bool,
 ) void {
     if (enable_lighting) {
-        const light_dimension: Vector3 = light_bounds.getDimension();
-        const inverse_light_dimension: Vector3 = light_dimension.divideFByMe(1);
-        group.setLightBounds(light_bounds.min, inverse_light_dimension);
-
-        group.enableLighting(light_bounds);
-
         const cell_count: u32 = group.commands.light_voxel_dimension;
-        const inverse_cell_count: Vector3 = Vector3.newU(cell_count, cell_count, cell_count).divideFByMe(1);
 
-        solution.spatial_probe_index.min_corner = light_bounds.min;
-        solution.spatial_probe_index.cell_dimension = light_dimension.hadamardProduct(inverse_cell_count);
-        solution.spatial_probe_index.inverse_cell_dimension = solution.spatial_probe_index.cell_dimension.divideFByMe(1);
-        solution.spatial_probe_index.dimension_power_of_2 = .splat(LIGHT_LOOKUP_VOXEL_DIM_POW_2);
+        _ = origin_position;
+        _ = camera_offset_from_origin;
+        // TODO: Should we just divid chunk_dumension_in_meters by some constant here, so that we know that the origin
+        // is always aligned?
+        // const x_displacement: f32 = @mod((origin_position.chunk_x & 1) * @mod(chunk_dimension_in_meters, 2), 2);
+
+        solution.voxel_cell_dimension = .splat(2);
+        solution.inverse_voxel_cell_dimension = solution.voxel_cell_dimension.divideFByMe(1);
+        // solution.voxel_min_corner_hot = .new(-x_displacement, 0, 0);
+        solution.voxel_min_corner_large = solution.voxel_min_corner_hot.minus(
+            solution.voxel_cell_dimension.hadamardProduct(solution.hot_corner_i.fromV3u()),
+        );
+
+        const light_dimension: Vector3 = solution.voxel_cell_dimension.scaledTo(@floatFromInt(cell_count));
+        const inverse_light_dimension: Vector3 = light_dimension.divideFByMe(1);
+        const light_bounds: Rectangle3 = .fromMinDimension(solution.voxel_min_corner_hot, light_dimension);
+
+        group.setLightBounds(light_bounds.min, inverse_light_dimension);
+        group.enableLighting(light_bounds);
     }
 }
 
@@ -866,7 +894,7 @@ pub fn endLightingComputation(
 
     solution.light_probe_count = commands.light_probe_count;
     solution.light_probe_position = commands.light_probe_position;
-    solution.light_probe_irradiance = commands.light_probe_irradiance;
+    // solution.light_probe_irradiance = commands.light_probe_irradiance;
 
     if (solution.update_debug_lines) {
         solution.debug_line_count = 0;
@@ -875,9 +903,6 @@ pub fn endLightingComputation(
     solution.box_count = @intCast(group.commands.light_occluder_count);
     solution.boxes = group.commands.light_occluders;
     // solution.point_count = group.light_point_index;
-
-    const probe_position: [*]Vector3 = group.commands.light_probe_position;
-    const probe_irradiance: [*]LightProbeIrradiance = group.commands.light_probe_irradiance;
 
     // From the linear blend coeeficient t_irradiance_preservation between the two successive frames of irradiance data,
     // we "derive" two coefficients, one for the multiplication at the end that renormalizes, and one for the new ray
@@ -898,53 +923,7 @@ pub fn endLightingComputation(
     }
 
     const light_position: Vector3 = solution.debug_light_position;
-    const light_radius_coefficient: f32 = 1.0 / 10.0;
     const light_intensity: f32 = 0.1 * MAX_LIGHT_INTENSITY;
-    const light_color: Color3 = .new(1, 1, 1);
-
-    {
-        var light_probe_index: u16 = 1;
-        while (light_probe_index < solution.light_probe_count) : (light_probe_index += 1) {
-            const position: Vector3 = probe_position[light_probe_index];
-            const radius: Vector3 = .new(1, 1, 1);
-            solution.addProbeToSpacialIndex(&solution.spatial_probe_index, light_probe_index, position, radius);
-
-            if (true) {
-                var light_normal: Vector3 = light_position.minus(position);
-                const light_distance: f32 = light_normal.length();
-                light_normal = light_normal.normalizeOrZero();
-
-                var light_coefficient: f32 = math.clampf01(1.0 - light_radius_coefficient * light_distance);
-                light_coefficient = light_intensity * light_coefficient;
-
-                var west_alpha: f32 = math.clampf01(-light_normal.x());
-                var east_alpha: f32 = math.clampf01(light_normal.x());
-                var south_alpha: f32 = math.clampf01(-light_normal.y());
-                var north_alpha: f32 = math.clampf01(light_normal.y());
-                var down_alpha: f32 = math.clampf01(-light_normal.z());
-                var up_alpha: f32 = math.clampf01(light_normal.z());
-
-                const total_alpha: f32 =
-                    west_alpha + east_alpha + south_alpha + north_alpha + down_alpha + up_alpha;
-                const inverse_total_alpha: f32 = math.safeRatio1(light_coefficient, total_alpha);
-
-                west_alpha *= inverse_total_alpha;
-                east_alpha *= inverse_total_alpha;
-                south_alpha *= inverse_total_alpha;
-                north_alpha *= inverse_total_alpha;
-                down_alpha *= inverse_total_alpha;
-                up_alpha *= inverse_total_alpha;
-
-                const irradiance: *LightProbeIrradiance = &probe_irradiance[light_probe_index];
-                irradiance.light[0] = light_color.scaledTo(west_alpha);
-                irradiance.light[1] = light_color.scaledTo(east_alpha);
-                irradiance.light[2] = light_color.scaledTo(south_alpha);
-                irradiance.light[3] = light_color.scaledTo(north_alpha);
-                irradiance.light[4] = light_color.scaledTo(down_alpha);
-                irradiance.light[5] = light_color.scaledTo(up_alpha);
-            }
-        }
-    }
 
     if (false) {
         buildSpatialPartitionForLighting(solution);
@@ -978,7 +957,41 @@ pub fn endLightingComputation(
         const light4_uvw: Vector3 =
             voxel_inverse_total_dimension.hadamardProduct(light_position4.minus(setup.voxel_min_corner));
 
-        var probe_index_pointer: [*]u16 = solution.spatial_probe_index.light_index;
+        {
+            var z: u32 = 0;
+            while (z < voxel_dimension) : (z += 1) {
+                var y: u32 = 0;
+                while (y < voxel_dimension) : (y += 1) {
+                    var x: u32 = 0;
+                    while (x < voxel_dimension) : (x += 1) {
+                        var light_normal0: Vector3 = .zero();
+                        var light_color0: Color3 = .zero();
+
+                        const voxel_center_position: Vector3 = solution.voxel_min_corner_large.plus(
+                            Vector3.newU(x, y, z).plus(.splat(0.5)).hadamardProduct(solution.voxel_cell_dimension),
+                        );
+
+                        var light_normal: Vector3 = light_position.minus(voxel_center_position);
+                        const light_distance: f32 = light_normal.length();
+                        light_normal = light_normal.normalizeOrZero();
+
+                        var light_coefficient: f32 = 1.0 - 0.12 * light_distance;
+                        light_coefficient *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
+
+                        // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+                        // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+                        const light_alpha: f32 = math.clampf(-1, light_coefficient, 1);
+
+                        light_normal0 = light_normal;
+                        light_color0 = Color3.new(1, 1, 1).scaledTo(light_alpha);
+
+                        solution.cells[z][y][x].light_normal[0] = light_normal0;
+                        solution.cells[z][y][x].light_color[0] = light_color0;
+                    }
+                }
+            }
+        }
+
         var z: u32 = 0;
         while (z < voxel_dimension) : (z += 1) {
             var y: u32 = 0;
@@ -1078,33 +1091,23 @@ pub fn endLightingComputation(
                         }
                     }
 
-                    if (TEST_LIGHT_PROBES) {
-                        light_normal0 = .new(0, 0, 1);
-                        const probe_index: u16 = probe_index_pointer[0];
+                    if (TEST_LIGHT_TRANSFER) {
+                        const hot_z: u32 = solution.hot_corner_i.z() + z;
+                        const hot_y: u32 = solution.hot_corner_i.y() + y;
+                        const hot_x: u32 = solution.hot_corner_i.x() + x;
+                        const cell: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
 
-                        if (probe_index != 0) {
-                            probe_index_pointer[0] = 0;
+                        light_normal0 = cell.light_normal[0];
+                        light_color0 = irradiancePack(cell.light_color[0]);
 
-                            const irradiance: *LightProbeIrradiance = &probe_irradiance[probe_index];
-                            light_color0 = irradiancePack(irradiance.light[0].scaledTo(irradiance_blend_u));
+                        light_normal1 = cell.light_normal[1];
+                        light_color1 = irradiancePack(cell.light_color[1]);
 
-                            if (false) {
-                                var light_override: u32 = 0x10000000;
+                        light_normal2 = cell.light_normal[2];
+                        light_color2 = irradiancePack(cell.light_color[2]);
 
-                                if (@mod(x, 2) == 0) {
-                                    light_override |= 0x00ff0000;
-                                }
-                                if (@mod(y, 2) == 0) {
-                                    light_override |= 0x0000ff00;
-                                }
-                                if (@mod(x, 2) == 0) {
-                                    light_override |= 0x000000ff;
-                                }
-
-                                light_color0 = light_override;
-                            }
-                        }
-                        probe_index_pointer += 1;
+                        light_normal3 = cell.light_normal[3];
+                        light_color3 = irradiancePack(cell.light_color[3]);
                     }
 
                     const element_index: u32 = z * voxel_dimension * voxel_dimension + y * voxel_dimension + x;

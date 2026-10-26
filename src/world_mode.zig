@@ -49,7 +49,6 @@ const RenderCommands = renderer.RenderCommands;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const TransientClipRect = renderer.TransientClipRect;
 const LightingSolution = lighting.LightingSolution;
-const LightingTextures = lighting.LightingTextures;
 const Camera = cam.Camera;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
@@ -578,39 +577,45 @@ pub fn updateAndRenderWorld(
         );
     }
 
-    const focus_z: f32 = 0.5 * (world_mode.camera.expected_focus_min_z + world_mode.camera.expected_focus_max_z);
-    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(focus_z);
-    const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
-        world_camera_rect.max.x() - world_camera_rect.min.x(),
-        world_camera_rect.max.y() - world_camera_rect.min.y(),
-    ));
-    var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
-        screen_bounds.min.toVector3(0),
-        screen_bounds.max.toVector3(0),
-    );
-    _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
-    _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
-
-    // There are risks to allowing the simulation region to be determined by the camera, because of the way we use
-    // "brains" wherer logical entity collections can be split by a simulation boundary.
-    var sim_bounds: Rectangle3 = .fromCenterDimension(
+    const sim_bounds: Rectangle3 = .fromCenterDimension(
         .zero(),
         world_mode.standard_room_dimension.scaledTo(3),
     );
-    sim_bounds = world_camera_rect.addRadius(.new(5, 5, 0)).getUnionWith(&sim_bounds);
 
-    var light_bounds: Rectangle3 = world_camera_rect;
-    _ = light_bounds.min.setZ(sim_bounds.min.z());
-    _ = light_bounds.max.setZ(sim_bounds.max.z());
-    // light_bounds = light_bounds.addRadius(.new(4, 3, 0));
-    const adjustment_y: f32 = light_bounds.getDimension().x() - light_bounds.getDimension().y();
-    _ = light_bounds.min.setY(light_bounds.min.y() - 0.5 * adjustment_y);
-    _ = light_bounds.max.setY(light_bounds.max.y() + 0.5 * adjustment_y);
+    // const focus_z: f32 = 0.5 * (world_mode.camera.expected_focus_min_z + world_mode.camera.expected_focus_max_z);
+    // const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(focus_z);
+    // const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
+    //     world_camera_rect.max.x() - world_camera_rect.min.x(),
+    //     world_camera_rect.max.y() - world_camera_rect.min.y(),
+    // ));
+    // var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
+    //     screen_bounds.min.toVector3(0),
+    //     screen_bounds.max.toVector3(0),
+    // );
+    // _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
+    // _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
+    //
+    // // There are risks to allowing the simulation region to be determined by the camera, because of the way we use
+    // // "brains" wherer logical entity collections can be split by a simulation boundary.
+    // var sim_bounds: Rectangle3 = .fromCenterDimension(
+    //     .zero(),
+    //     world_mode.standard_room_dimension.scaledTo(3),
+    // );
+    // sim_bounds = world_camera_rect.addRadius(.new(5, 5, 0)).getUnionWith(&sim_bounds);
+
+    // var light_bounds: Rectangle3 = world_camera_rect;
+    // _ = light_bounds.min.setZ(sim_bounds.min.z());
+    // _ = light_bounds.max.setZ(sim_bounds.max.z());
+    // // light_bounds = light_bounds.addRadius(.new(4, 3, 0));
+    // const adjustment_y: f32 = light_bounds.getDimension().x() - light_bounds.getDimension().y();
+    // _ = light_bounds.min.setY(light_bounds.min.y() - 0.5 * adjustment_y);
+    // _ = light_bounds.max.setY(light_bounds.max.y() + 0.5 * adjustment_y);
 
     lighting.beginLightingComputation(
         &world_mode.test_lighting,
         &render_group,
-        light_bounds,
+        world_mode.camera.simulation_center,
+        delta_from_sim,
         world_mode.updating_lighting,
     );
 
@@ -721,40 +726,42 @@ pub fn updateAndRenderWorld(
             //     .new(1, 1, 0, 1),
             //     0.01,
             // );
-            render_group.pushVolumeOutline(
-                world_camera_rect,
-                .new(1, 1, 1, 1),
-                0.1,
-            );
+
+            // render_group.pushVolumeOutline(
+            //     world_camera_rect,
+            //     .new(1, 1, 1, 1),
+            //     0.1,
+            // );
             render_group.pushVolumeOutline(
                 chunk_boundary,
                 .new(1, 0.5, 0, 1),
                 0.1,
             );
-            render_group.pushRectangleOutline(
-                screen_bounds.getDimension(),
-                Vector3.new(0, 0, 0.005),
-                Color.new(1, 1, 0, 1),
-                0.1,
-            );
-            render_group.pushRectangleOutline(
-                screen_bounds.getDimension(),
-                Vector3.new(0, 0, 0.005),
-                Color.new(1, 1, 0, 1),
-                0.1,
-            );
+            // render_group.pushRectangleOutline(
+            //     screen_bounds.getDimension(),
+            //     Vector3.new(0, 0, 0.005),
+            //     Color.new(1, 1, 0, 1),
+            //     0.1,
+            // );
+            // render_group.pushRectangleOutline(
+            //     screen_bounds.getDimension(),
+            //     Vector3.new(0, 0, 0.005),
+            //     Color.new(1, 1, 0, 1),
+            //     0.1,
+            // );
+            //
             // render_group.pushRectangleOutline(
             //     camera_bounds_in_meters.getDimension().xy(),
             //     Vector3.zero(),
             //     Color.new(1, 1, 1, 1),
             //     0.1,
             // );
-            render_group.pushRectangleOutline(
-                light_bounds.getDimension().xy(),
-                Vector3.new(0, 0, 0.005),
-                Color.new(0, 1, 1, 1),
-                0.1,
-            );
+            // render_group.pushRectangleOutline(
+            //     light_bounds.getDimension().xy(),
+            //     Vector3.new(0, 0, 0.005),
+            //     Color.new(0, 1, 1, 1),
+            //     0.1,
+            // );
             render_group.pushRectangleOutline(
                 world_sim.sim_region.bounds.getDimension().xy(),
                 Vector3.new(0, 0, 0.005),
