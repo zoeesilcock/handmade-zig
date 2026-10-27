@@ -100,6 +100,7 @@ pub const GameModeWorld = struct {
     camera: GameCamera,
 
     standard_room_dimension: Vector3 = .zero(),
+    fundamental_unit: f32,
     typical_floor_height: f32 = 0,
 
     effects_entropy: random.Series,
@@ -179,12 +180,11 @@ pub fn playWorld(state: *State, max_light_probe_count: u32) void {
         ArenaPushParams.aligned(@alignOf(GameModeWorld), true),
         @src(),
     );
-    lighting.initLighting(&world_mode.test_lighting, &state.mode_arena);
     world_mode.updating_lighting = true;
 
     world_mode.fog_min = 6;
     world_mode.fog_span = 24;
-    world_mode.alpha_min = 2.75;
+    world_mode.alpha_min = 2.25;
     world_mode.alpha_span = 0.75;
     world_mode.debug_camera_dolly = 10;
 
@@ -192,12 +192,19 @@ pub fn playWorld(state: *State, max_light_probe_count: u32) void {
         state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false), @src());
     particles.initParticleCache(world_mode.particle_cache, state.assets);
 
+    world_mode.fundamental_unit = 1.4;
     world_mode.effects_entropy = .seed(1234, null, null, null);
-    world_mode.typical_floor_height = 5;
+    world_mode.typical_floor_height = 3 * world_mode.fundamental_unit;
+
+    lighting.initLighting(&world_mode.test_lighting, &state.mode_arena, world_mode.fundamental_unit);
 
     // TODO: Replace this with a value received from the renderer.
     // const pixels_to_meters = 1.0 / 42.0;
-    const chunk_dimension_in_meters = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
+    const chunk_dimension_in_meters = Vector3.new(
+        17 * world_mode.fundamental_unit,
+        9 * world_mode.fundamental_unit,
+        world_mode.typical_floor_height,
+    );
 
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena, max_light_probe_count);
     state.mode = .{ .world = world_mode };

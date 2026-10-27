@@ -746,7 +746,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
             @as(i32, @intCast(@intFromBool(depth_peel))),
-            @as(u32, @intCast(@intFromBool(lighting_disabled))),
+            @as(i32, @intCast(@intFromBool(lighting_disabled))),
             // @as(i32, 1),
             MAX_LIGHT_INTENSITY,
         },

@@ -43,6 +43,14 @@ const ParticleCache = particles.ParticleCache;
 
 const MAX_SIM_REGION_ENTITY_COUNT = world.MAX_SIM_REGION_ENTITY_COUNT;
 
+// TODO:
+// * Traversables should be their own entrities, so they can also store ground_position and be interpolated.
+// * Entities should have parents that control their movement.
+// * Pieces should go away, and we should just use multiple entities for objects that have multiple parts.
+//
+// When we do all this, maybe make ground_position a first-class citizen and set it in the generator so we don't get
+// artifacts from jumping on uneven terrain vis a vis the alpha/fog.
+
 // introspect(SimRegion)
 pub const SimRegion = extern struct {
     world: *World,
@@ -765,7 +773,7 @@ pub fn updateCameraForEntityMovement(
         new_target_position = new_target_position.plus(camera_arm);
 
         room_focus_z = camera_arm.z();
-        entity_focus_z = new_target_position.minus(entity.position).z();
+        entity_focus_z = new_target_position.minus(entity.ground_position).z();
     }
 
     camera.target_expected_focus_min_z = @min(room_focus_z, entity_focus_z);

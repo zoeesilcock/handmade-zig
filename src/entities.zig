@@ -233,8 +233,9 @@ pub const Entity = extern struct {
     //
     discard_everything_after: u64,
 
-    acceleration: Vector3 = Vector3.zero(),
     bob_acceleration: f32 = 0,
+    acceleration: Vector3 = Vector3.zero(),
+    ground_position: Vector3 = Vector3.zero(),
 
     ground_cover_count: u32,
     ground_cover: [ENTITY_MAX_GROUND_COVER]GroundCover,
@@ -404,6 +405,7 @@ pub fn updateAndRenderEntities(
                 }
             }
 
+            entity.ground_position = entity.position;
             const start_position: Vector3 = entity.position;
             switch (entity.movement_mode) {
                 .Planted => {},
@@ -423,6 +425,7 @@ pub fn updateAndRenderEntities(
                         const a: Vector3 = Vector3.new(0, 0, -2);
                         const b: Vector3 = movement_to.minus(movement_from).minus(a);
                         entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(movement_from);
+                        entity.ground_position = movement_from.lerp(movement_to, t);
                     }
 
                     if (entity.movement_time >= 1) {
