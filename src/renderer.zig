@@ -941,6 +941,29 @@ pub const RenderGroup = extern struct {
         }
     }
 
+    pub fn pushOccluder(
+        self: *RenderGroup,
+        position: Vector3,
+        radius: Vector3,
+        color: Color,
+    ) void {
+        const commands: *RenderCommands = self.commands;
+        if (self.lighting_enabled) {
+            // TODO: We don't really want to use the textures, probably, for lighting? Or maybe we do?
+            std.debug.assert(commands.light_occluder_count < commands.max_light_occluder_count);
+            const box: *LightingBox = &commands.light_occluders[commands.light_occluder_count];
+            commands.light_occluder_count += 1;
+
+            box.position = position;
+            box.radius = radius;
+            box.reflection_color = color.rgb();
+            box.emission = 0;
+            box.texture_index = 0;
+            box.child_count = 0;
+            box.first_child_index = 0;
+        }
+    }
+
     pub fn pushCube(
         self: *RenderGroup,
         texture: RendererTexture,
@@ -951,7 +974,6 @@ pub const RenderGroup = extern struct {
         opt_emission: ?f32,
         opt_z_bias: ?f32,
     ) void {
-        const commands: *RenderCommands = self.commands;
         const uv_layout: CubeUVLayout = opt_uv_layout orelse .default;
         const emission = opt_emission orelse 0;
         const z_bias: f32 = opt_z_bias orelse 0;
@@ -960,21 +982,6 @@ pub const RenderGroup = extern struct {
         std.debug.assert(emission <= 1);
 
         if (self.getCurrentQuads(6, texture) != null) {
-            if (self.lighting_enabled) {
-                // TODO: We don't really want to use the textures, probably, for lighting? Or maybe we do?
-                std.debug.assert(commands.light_occluder_count < commands.max_light_occluder_count);
-                const box: *LightingBox = &commands.light_occluders[commands.light_occluder_count];
-                commands.light_occluder_count += 1;
-
-                box.position = position;
-                box.radius = radius;
-                box.reflection_color = color.rgb();
-                box.emission = emission;
-                box.texture_index = texture.values.index;
-                box.child_count = 0;
-                box.first_child_index = 0;
-            }
-
             const nx: f32 = position.x() - radius.x();
             const px: f32 = position.x() + radius.x();
             const ny: f32 = position.y() - radius.y();

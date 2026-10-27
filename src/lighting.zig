@@ -395,6 +395,7 @@ fn raycast(
     work: *LightingWork,
     ray_origin: V3_4x,
     ray_direction: V3_4x,
+    debugging: bool,
 ) RaycastResult {
     const solution: *LightingSolution = work.solution;
     work.total_casts_initiated += 1;
@@ -445,36 +446,117 @@ fn raycast(
             const t_min: F32_4x = @max(t_min3.x, @max(t_min3.y, t_min3.z));
             const t_max: F32_4x = @min(t_max3.x, @min(t_max3.y, t_max3.z));
 
-            const max_pass: Bool_4x = t_max > @as(F32_4x, zero);
+            const max_pass: Bool_4x = t_max >= @as(F32_4x, zero);
 
+            var box_color: Color = .new(0, 0, 0, 1);
+
+            // TODO: We probably want t_close_enough to be based on the particular box, such that boxes at the root of
+            // the hierarchy are more likely to be entered than boxes near the leaves.
             if (simd.anyTrue(max_pass)) {
-                const t_inside: Bool_4x = max_pass & (t_min < @as(F32_4x, zero));
+                const t_inside: Bool_4x = max_pass & (t_min <= @as(F32_4x, zero));
+                // TODO: Do we actually need `(t_min < t_max)` here?
                 const t_valid: Bool_4x = (t_min > @as(F32_4x, zero)) & (t_min < t_max);
                 const mask: Bool_4x = t_valid & (t_min < t_ray);
                 const close_enough: Bool_4x = mask & (t_min < t_close_enough);
+                const any_closer: bool = simd.anyTrue(mask);
+                const any_inside: bool = simd.anyTrue(t_inside);
+                const any_close_enough: bool = simd.anyTrue(close_enough);
 
-                if (box.child_count > 0 and (simd.anyTrue(t_inside) or simd.anyTrue(close_enough))) {
+                // if (box.child_count > 0 and (any_inside or (any_closer and any_close_enough))) {
+                if (box.child_count > 0 and (any_inside or any_close_enough)) {
                     std.debug.assert(depth < box_stack.len);
                     box_stack[depth] = box;
                     depth += 1;
-                } else if (simd.anyTrue(t_valid)) {
+
+                    box_color = .new(1, 0, 1, 1);
+                } else if (any_closer) {
                     t_ray = @select(f32, mask, t_min, t_ray);
                     hit_box_center = hit_box_center.select(mask, box_position);
                     hit_box_radius = hit_box_radius.select(mask, box_radius);
                     hit_reflection_color =
                         hit_reflection_color.select(mask, .fromVector3(box.reflection_color.toVector3()));
                     hit_emission = @select(f32, mask, @as(F32_4x, @splat(box.emission)), hit_emission);
+                    work.total_partition_leaves_used += 1;
 
-                    // TODO: I think this was just a straight-up bug in our original implementation.
-                    if (false) {
-                        if (simd.allTrue(@bitCast(mask))) {
-                            work.total_partition_leaves_used += 1;
-                            break;
-                        }
-                    } else {
-                        work.total_partition_leaves_used += 1;
-                    }
+                    box_color = if (box.child_count > 0) .new(0, 1, 1, 1) else .new(1, 1, 0, 1);
                 }
+            }
+
+            if (debugging) {
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_min.y[0], box_min.z[0]),
+                    .new(box_min.x[0], box_max.y[0], box_min.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_max.y[0], box_min.z[0]),
+                    .new(box_min.x[0], box_max.y[0], box_max.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_max.y[0], box_max.z[0]),
+                    .new(box_min.x[0], box_min.y[0], box_max.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_min.y[0], box_max.z[0]),
+                    .new(box_min.x[0], box_min.y[0], box_min.z[0]),
+                    box_color,
+                );
+
+                pushDebugLine(
+                    solution,
+                    .new(box_max.x[0], box_min.y[0], box_min.z[0]),
+                    .new(box_max.x[0], box_max.y[0], box_min.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_max.x[0], box_max.y[0], box_min.z[0]),
+                    .new(box_max.x[0], box_max.y[0], box_max.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_max.x[0], box_max.y[0], box_max.z[0]),
+                    .new(box_max.x[0], box_min.y[0], box_max.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_max.x[0], box_min.y[0], box_max.z[0]),
+                    .new(box_max.x[0], box_min.y[0], box_min.z[0]),
+                    box_color,
+                );
+
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_min.y[0], box_min.z[0]),
+                    .new(box_max.x[0], box_min.y[0], box_min.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_max.y[0], box_min.z[0]),
+                    .new(box_max.x[0], box_max.y[0], box_min.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_max.y[0], box_max.z[0]),
+                    .new(box_max.x[0], box_max.y[0], box_max.z[0]),
+                    box_color,
+                );
+                pushDebugLine(
+                    solution,
+                    .new(box_min.x[0], box_min.y[0], box_max.z[0]),
+                    .new(box_max.x[0], box_min.y[0], box_max.z[0]),
+                    box_color,
+                );
             }
         }
     }
@@ -558,7 +640,7 @@ fn computeLightPropagation(
         while (ray_index < ray_count) : (ray_index += 1) {
             const ray_direction: V3_4x = sampling_sphere.sample_direction[ray_index];
 
-            const ray: RaycastResult = raycast(work, ray_origin, ray_direction);
+            const ray: RaycastResult = raycast(work, ray_origin, ray_direction, false);
             const t_hit: F32_4x = @as(F32_4x, @splat(std.math.floatMax(f32))) != ray.t_ray;
 
             var sub_ray: u32 = 0;
@@ -997,26 +1079,60 @@ pub fn endLightingComputation(
 
                             var light_distance_falloff: f32 = math.clampf01(1.0 - 0.12 * light_distance);
 
-                            const voxel_center_position4x: V3_4x = .fromVector3(voxel_center_position);
-                            const light_normal4x: V3_4x = .fromVector3(light_normal);
-                            const cast: RaycastResult = raycast(&work, voxel_center_position4x, light_normal4x);
-                            if (cast.t_ray[0] < light_distance) {
-                                if (x >= (solution.hot_corner_i.x() + hot_dimension / 2 - 4) and
-                                    y >= (solution.hot_corner_i.y() + hot_dimension / 2 - 4) and
-                                    z >= (solution.hot_corner_i.z() + hot_dimension / 2 - 4) and
-                                    x < (solution.hot_corner_i.x() + hot_dimension / 2 + 4) and
-                                    y < (solution.hot_corner_i.y() + hot_dimension / 2 + 4) and
-                                    z < (solution.hot_corner_i.z() + hot_dimension / 2 + 4))
-                                {
-                                    pushDebugLine(
-                                        solution,
-                                        voxel_center_position,
-                                        cast.position.getComponent(0),
-                                        .new(1, 1, 0, 1),
-                                    );
-                                }
+                            if (true) {
+                                const voxel_center_position4x: V3_4x = .fromVector3(voxel_center_position);
+                                const light_normal4x: V3_4x = .fromVector3(light_normal);
 
-                                light_distance_falloff = 0;
+                                const is_test_cast: bool = false;
+
+                                // const is_test_cast: bool =
+                                //     x >= (solution.hot_corner_i.x() + hot_dimension / 2 - 4) and
+                                //     y >= (solution.hot_corner_i.y() + hot_dimension / 2 - 4) and
+                                //     z >= (solution.hot_corner_i.z() + hot_dimension / 2 - 4) and
+                                //     x < (solution.hot_corner_i.x() + hot_dimension / 2 + 4) and
+                                //     y < (solution.hot_corner_i.y() + hot_dimension / 2 + 4) and
+                                //     z < (solution.hot_corner_i.z() + hot_dimension / 2 + 4);
+
+                                // const is_test_cast: bool =
+                                //     x == (solution.hot_corner_i.x() + hot_dimension / 2 + 3) and
+                                //     y == (solution.hot_corner_i.y() + hot_dimension / 2 - 2) and
+                                //     z == (solution.hot_corner_i.z() + hot_dimension / 2 + 2);
+
+                                const cast: RaycastResult = raycast(&work, voxel_center_position4x, light_normal4x, false);
+                                const hit: bool = cast.t_ray[0] < light_distance;
+                                const line_color: Color = if (hit) .new(1, 1, 0, 1) else .new(0, 0, 0, 1);
+                                if (true) {
+                                    var cast_position: Vector3 = cast.position.getComponent(0);
+
+                                    if (!hit) {
+                                        cast_position = voxel_center_position.plus(light_normal.scaledTo(light_distance));
+                                    }
+
+                                    if (is_test_cast) {
+                                        pushDebugLine(
+                                            solution,
+                                            voxel_center_position,
+                                            cast_position,
+                                            line_color,
+                                        );
+                                        pushDebugLine(
+                                            solution,
+                                            voxel_center_position,
+                                            voxel_center_position.plus(.new(0, 0, 0.025)),
+                                            .new(0, 1, 1, 1),
+                                        );
+                                        pushDebugLine(
+                                            solution,
+                                            voxel_center_position,
+                                            voxel_center_position.plus(light_normal.scaledTo(0.1)),
+                                            .new(1, 0, 1, 1),
+                                        );
+                                    }
+
+                                    if (hit) {
+                                        light_distance_falloff = 0;
+                                    }
+                                }
                             }
 
                             // TODO: We should probably have our "darkness" range be quite a bit less than our brightness

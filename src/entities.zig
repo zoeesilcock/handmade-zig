@@ -577,15 +577,18 @@ pub fn updateAndRenderEntities(
                             color.a(),
                         );
                     } else if (piece.flags & @backingInt(EntityVisiblePieceFlag.Cube) != 0) {
+                        const cube_position = entity_ground_point.plus(piece.offset);
+                        const cube_radius = piece.dimension;
                         asset_rendering.pushCubeBitmapId(
                             render_group,
                             bitmap_id,
-                            entity_ground_point.plus(piece.offset),
-                            piece.dimension,
+                            cube_position,
+                            cube_radius,
                             color,
                             piece.extra.cube_uv_layout,
                             null,
                         );
+                        render_group.pushOccluder(cube_position, cube_radius, color);
                     } else {
                         if (opt_assets) |assets| {
                             if (bitmap_id) |id| {
