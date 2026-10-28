@@ -15,5 +15,5 @@ pub const Config = struct {
     Simulation_VisualizeCollisionVolumes: bool = false,
     Simulation_InspectSelectedEntity: bool = true,
 
-    Lighting_ShowProbes: bool = true,
+    Lighting_ShowProbes: bool = false,
 };

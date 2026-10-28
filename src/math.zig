@@ -56,6 +56,13 @@ fn Vector2Type(comptime ScalarType: type) type {
             );
         }
 
+        pub fn fromV2i(self: Vector2i) Vector2 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+            );
+        }
+
         pub fn perp(self: *const Self) Self {
             return Self{ .values = .{ -self.values[1], self.values[0] } };
         }
@@ -176,6 +183,14 @@ fn Vector3Type(comptime ScalarType: type) type {
         }
 
         pub fn fromV3u(self: Vector3u) Vector3 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+                @floatFromInt(self.z()),
+            );
+        }
+
+        pub fn fromV3i(self: Vector3i) Vector3 {
             return .new(
                 @floatFromInt(self.x()),
                 @floatFromInt(self.y()),

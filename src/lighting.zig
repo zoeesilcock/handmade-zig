@@ -195,7 +195,7 @@ pub const LightingSolution = struct {
     update_debug_lines: bool,
     debug_probe_index: u32,
     debug_line_count: u32,
-    debug_lines: [4096]DebugLine = undefined,
+    debug_lines: [65535]DebugLine = undefined,
 
     accumulation_count: f32 = 0,
     accumulating: bool = false,
@@ -409,7 +409,7 @@ fn raycast(
     const zero: F32_4x = @splat(0);
     const one: F32_4x = @splat(1);
     const one_u: U32_4x = @splat(1);
-    const t_close_enough: F32_4x = @splat(10);
+    const t_close_enough: F32_4x = @splat(15);
 
     const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(one)).dividedBy(ray_direction);
 
@@ -483,80 +483,7 @@ fn raycast(
             }
 
             if (debugging) {
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_min.y[0], box_min.z[0]),
-                    .new(box_min.x[0], box_max.y[0], box_min.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_max.y[0], box_min.z[0]),
-                    .new(box_min.x[0], box_max.y[0], box_max.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_max.y[0], box_max.z[0]),
-                    .new(box_min.x[0], box_min.y[0], box_max.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_min.y[0], box_max.z[0]),
-                    .new(box_min.x[0], box_min.y[0], box_min.z[0]),
-                    box_color,
-                );
-
-                pushDebugLine(
-                    solution,
-                    .new(box_max.x[0], box_min.y[0], box_min.z[0]),
-                    .new(box_max.x[0], box_max.y[0], box_min.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_max.x[0], box_max.y[0], box_min.z[0]),
-                    .new(box_max.x[0], box_max.y[0], box_max.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_max.x[0], box_max.y[0], box_max.z[0]),
-                    .new(box_max.x[0], box_min.y[0], box_max.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_max.x[0], box_min.y[0], box_max.z[0]),
-                    .new(box_max.x[0], box_min.y[0], box_min.z[0]),
-                    box_color,
-                );
-
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_min.y[0], box_min.z[0]),
-                    .new(box_max.x[0], box_min.y[0], box_min.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_max.y[0], box_min.z[0]),
-                    .new(box_max.x[0], box_max.y[0], box_min.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_max.y[0], box_max.z[0]),
-                    .new(box_max.x[0], box_max.y[0], box_max.z[0]),
-                    box_color,
-                );
-                pushDebugLine(
-                    solution,
-                    .new(box_min.x[0], box_min.y[0], box_max.z[0]),
-                    .new(box_max.x[0], box_min.y[0], box_max.z[0]),
-                    box_color,
-                );
+                pushDebugBox(solution, box_min.getComponent(0), box_max.getComponent(0), box_color);
             }
         }
     }
@@ -600,6 +527,99 @@ fn pushDebugLine(solution: *LightingSolution, from_position: Vector3, to_positio
         line.to_position = to_position;
         line.color = color;
     }
+}
+
+fn pushDebugBox(solution: *LightingSolution, box_min: Vector3, box_max: Vector3, color: Color) void {
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_min.y(), box_min.z()),
+        .new(box_min.x(), box_max.y(), box_min.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_max.y(), box_min.z()),
+        .new(box_min.x(), box_max.y(), box_max.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_max.y(), box_max.z()),
+        .new(box_min.x(), box_min.y(), box_max.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_min.y(), box_max.z()),
+        .new(box_min.x(), box_min.y(), box_min.z()),
+        color,
+    );
+
+    pushDebugLine(
+        solution,
+        .new(box_max.x(), box_min.y(), box_min.z()),
+        .new(box_max.x(), box_max.y(), box_min.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_max.x(), box_max.y(), box_min.z()),
+        .new(box_max.x(), box_max.y(), box_max.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_max.x(), box_max.y(), box_max.z()),
+        .new(box_max.x(), box_min.y(), box_max.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_max.x(), box_min.y(), box_max.z()),
+        .new(box_max.x(), box_min.y(), box_min.z()),
+        color,
+    );
+
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_min.y(), box_min.z()),
+        .new(box_max.x(), box_min.y(), box_min.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_max.y(), box_min.z()),
+        .new(box_max.x(), box_max.y(), box_min.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_max.y(), box_max.z()),
+        .new(box_max.x(), box_max.y(), box_max.z()),
+        color,
+    );
+    pushDebugLine(
+        solution,
+        .new(box_min.x(), box_min.y(), box_max.z()),
+        .new(box_max.x(), box_min.y(), box_max.z()),
+        color,
+    );
+}
+
+fn getVoxelIndex(solution: *LightingSolution, world_position: Vector3) Vector3i {
+    var f_coord: Vector3 = solution.inverse_voxel_cell_dimension.hadamardProduct(
+        world_position.minus(solution.voxel_min_corner_large),
+    );
+    const result: Vector3i = f_coord.f32ToI32();
+    return result;
+}
+
+fn getVoxelCenterPosition(solution: *LightingSolution, index: Vector3i) Vector3 {
+    const result: Vector3 = solution.voxel_min_corner_large.plus(
+        solution.voxel_cell_dimension.hadamardProduct(Vector3.fromV3i(index).plus(.new(0.5, 0.5, 0.5))),
+    );
+
+    return result;
 }
 
 fn computeLightPropagation(
@@ -985,6 +1005,282 @@ pub fn beginLightingComputation(
     }
 }
 
+fn frumbledyGok(
+    solution: *LightingSolution,
+) void {
+    const large_dimension: u32 = LIGHT_LARGE_VOXEL_DIM;
+    const light_position: Vector3 = solution.debug_light_position;
+
+    var work: LightingWork = .{
+        .solution = solution,
+        .first_light_probe_index = 0,
+        .one_past_last_light_probe_index = 0,
+    };
+
+    {
+        var z: u32 = 0;
+        while (z < large_dimension) : (z += 1) {
+            var y: u32 = 0;
+            while (y < large_dimension) : (y += 1) {
+                var x: u32 = 0;
+                while (x < large_dimension) : (x += 1) {
+                    var light_normal0: Vector3 = .zero();
+                    var light_color0: Color3 = .zero();
+
+                    if (true) {
+                        const voxel_center_position: Vector3 = solution.voxel_min_corner_large.plus(
+                            Vector3.newU(x, y, z).plus(.splat(0.5)).hadamardProduct(solution.voxel_cell_dimension),
+                        );
+
+                        var light_normal: Vector3 = light_position.minus(voxel_center_position);
+                        const light_distance: f32 = light_normal.length();
+                        light_normal = light_normal.normalizeOrZero();
+
+                        var light_distance_falloff: f32 = math.clampf01(1.0 - 0.125 * light_distance);
+
+                        if (true) {
+                            const voxel_center_position4x: V3_4x = .fromVector3(voxel_center_position);
+                            const light_normal4x: V3_4x = .fromVector3(light_normal);
+
+                            const is_test_cast: bool = false;
+
+                            // const is_test_cast: bool =
+                            //     x >= (solution.hot_corner_i.x() + hot_dimension / 2 - 4) and
+                            //     y >= (solution.hot_corner_i.y() + hot_dimension / 2 - 4) and
+                            //     z >= (solution.hot_corner_i.z() + hot_dimension / 2 - 4) and
+                            //     x < (solution.hot_corner_i.x() + hot_dimension / 2 + 4) and
+                            //     y < (solution.hot_corner_i.y() + hot_dimension / 2 + 4) and
+                            //     z < (solution.hot_corner_i.z() + hot_dimension / 2 + 4);
+
+                            // const is_test_cast: bool =
+                            //     x == (solution.hot_corner_i.x() + hot_dimension / 2 + 3) and
+                            //     y == (solution.hot_corner_i.y() + hot_dimension / 2 - 2) and
+                            //     z == (solution.hot_corner_i.z() + hot_dimension / 2 + 2);
+
+                            const cast: RaycastResult = raycast(&work, voxel_center_position4x, light_normal4x, false);
+                            const hit: bool = cast.t_ray[0] < light_distance;
+                            const line_color: Color = if (hit) .new(1, 1, 0, 1) else .new(0, 0, 0, 1);
+                            if (true) {
+                                var cast_position: Vector3 = cast.position.getComponent(0);
+
+                                if (!hit) {
+                                    cast_position = voxel_center_position.plus(light_normal.scaledTo(light_distance));
+                                }
+
+                                if (is_test_cast) {
+                                    pushDebugLine(
+                                        solution,
+                                        voxel_center_position,
+                                        cast_position,
+                                        line_color,
+                                    );
+                                    pushDebugLine(
+                                        solution,
+                                        voxel_center_position,
+                                        voxel_center_position.plus(.new(0, 0, 0.025)),
+                                        .new(0, 1, 1, 1),
+                                    );
+                                    pushDebugLine(
+                                        solution,
+                                        voxel_center_position,
+                                        voxel_center_position.plus(light_normal.scaledTo(0.1)),
+                                        .new(1, 0, 1, 1),
+                                    );
+                                }
+
+                                if (hit) {
+                                    light_distance_falloff = 0;
+                                }
+                            }
+                        }
+
+                        // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+                        // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+                        const light_alpha: f32 = math.lerpf(
+                            0.4 * MAX_LIGHT_INTENSITY,
+                            0.75 * MAX_LIGHT_INTENSITY,
+                            light_distance_falloff,
+                        );
+
+                        light_normal0 = light_normal;
+                        light_color0 = Color3.new(1, 1, 1).scaledTo(light_alpha);
+                    } else {
+                        light_normal0 = Vector3.new(1, 1, 1).normalizeOrZero();
+                        light_color0 = .zero();
+
+                        if (((x & 1) ^ (y & 1) ^ (z & 1)) != 0) {
+                            light_color0 = .new(10, 10, 10);
+                        } else {
+                            light_color0 = .new(7, 7, 7);
+                        }
+                    }
+
+                    solution.cells[z][y][x].light_normal[0] = light_normal0;
+                    solution.cells[z][y][x].light_color[0] = light_color0;
+                }
+            }
+        }
+    }
+}
+
+fn inLargeVoxel(solution: *LightingSolution, voxel_index: Vector3i) bool {
+    _ = solution;
+
+    const result: bool =
+        voxel_index.x() >= 0 and voxel_index.x() < LIGHT_LARGE_VOXEL_DIM and
+        voxel_index.y() >= 0 and voxel_index.y() < LIGHT_LARGE_VOXEL_DIM and
+        voxel_index.z() >= 0 and voxel_index.z() < LIGHT_LARGE_VOXEL_DIM;
+    return result;
+}
+
+fn spamVoxel(
+    solution: *LightingSolution,
+    voxel_index: Vector3i,
+    light_position: Vector3,
+    light_color: Color3,
+    is_test_cast: bool,
+) void {
+    if (inLargeVoxel(solution, voxel_index)) {
+        const voxel_center_position: Vector3 = getVoxelCenterPosition(solution, voxel_index);
+
+        if (is_test_cast) {
+            const box_radius: Vector3 = solution.voxel_cell_dimension.scaledTo(0.4);
+            pushDebugBox(
+                solution,
+                voxel_center_position.minus(box_radius),
+                voxel_center_position.plus(box_radius),
+                .new(1, 0.5, 0, 1),
+            );
+        }
+
+        var light_normal: Vector3 = light_position.minus(voxel_center_position);
+        const light_distance: f32 = light_normal.length();
+        light_normal = light_normal.normalizeOrZero();
+
+        const light_distance_falloff: f32 = math.clampf01(1.0 - 0.05 * light_distance);
+
+        // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
+        // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
+        const light_alpha: f32 = math.lerpf(
+            0.4 * MAX_LIGHT_INTENSITY,
+            0.75 * MAX_LIGHT_INTENSITY,
+            light_distance_falloff,
+        );
+
+        const light_normal0: Vector3 = light_normal;
+        const light_color0: Color3 = light_color.scaledTo(light_alpha);
+
+        const i: Vector3u = .new(@intCast(voxel_index.x()), @intCast(voxel_index.y()), @intCast(voxel_index.z()));
+        solution.cells[i.z()][i.y()][i.x()].light_normal[0] = light_normal0;
+        solution.cells[i.z()][i.y()][i.x()].light_color[0] = light_color0;
+    }
+}
+
+fn testCastFromProbes(
+    solution: *LightingSolution,
+) void {
+    var work: LightingWork = .{
+        .solution = solution,
+        .first_light_probe_index = 0,
+        .one_past_last_light_probe_index = 0,
+    };
+
+    var z: u32 = 0;
+    while (z < LIGHT_LARGE_VOXEL_DIM) : (z += 1) {
+        var y: u32 = 0;
+        while (y < LIGHT_LARGE_VOXEL_DIM) : (y += 1) {
+            var x: u32 = 0;
+            while (x < LIGHT_LARGE_VOXEL_DIM) : (x += 1) {
+                solution.cells[z][y][x].light_normal[0] = .zero();
+                solution.cells[z][y][x].light_color[0] = .zero();
+            }
+        }
+    }
+
+    var light_probe_index: u32 = 0;
+    while (light_probe_index < solution.light_probe_count) : (light_probe_index += 1) {
+        const light_position: Vector3 = solution.debug_light_position;
+        const light_color: Color3 = .new(1, 1, 1);
+
+        const cast_position: Vector3 = solution.light_probe_position[light_probe_index];
+
+        var cast_direction: Vector3 = light_position.minus(cast_position);
+        const t_max: f32 = cast_direction.length();
+        cast_direction = cast_direction.normalizeOrZero();
+
+        const probe_position4x: V3_4x = .fromVector3(cast_position);
+        const cast_direction4x: V3_4x = .fromVector3(cast_direction);
+
+        const is_test_cast: bool = false; //t_max < 3;
+
+        const cast: RaycastResult = raycast(&work, probe_position4x, cast_direction4x, false);
+        const hit: bool = cast.t_ray[0] < t_max;
+        const line_color: Color = if (hit) .new(1, 1, 0, 1) else .new(0, 0, 0, 1);
+        var hit_position: Vector3 = cast.position.getComponent(0);
+
+        if (!hit) {
+            hit_position = cast_position.plus(cast_direction.scaledTo(t_max));
+        }
+
+        if (is_test_cast) {
+            pushDebugLine(
+                solution,
+                cast_position,
+                hit_position,
+                line_color,
+            );
+            pushDebugLine(
+                solution,
+                cast_position,
+                cast_position.plus(.new(0, 0, 0.025)),
+                .new(0, 1, 1, 1),
+            );
+            pushDebugLine(
+                solution,
+                cast_position,
+                cast_position.plus(cast_direction.scaledTo(0.1)),
+                .new(1, 0, 1, 1),
+            );
+        }
+
+        if (false) {
+            if (hit) {
+                var secondary_cast_direction: Vector3 = light_position.minus(hit_position);
+                const t_max_secondary: f32 = secondary_cast_direction.length();
+                secondary_cast_direction = secondary_cast_direction.normalizeOrZero();
+
+                const secondary_cast_position4x: V3_4x = .fromVector3(hit_position);
+                const secondary_cast_direction4x: V3_4x = .fromVector3(secondary_cast_direction);
+                const secondary_cast: RaycastResult = raycast(&work, secondary_cast_position4x, secondary_cast_direction4x, false);
+
+                if (secondary_cast.t_ray[0] >= t_max_secondary) {
+                    light_position = hit_position;
+                    light_color = light_color.scaledTo(math.clampf01(1.0 - 0.05 * cast.t_ray[0]));
+                    hit = false;
+                }
+            }
+        }
+
+        if (!hit) {
+            const voxel_index: Vector3i = getVoxelIndex(solution, cast_position);
+            var dx: i32 = -1;
+            while (dx <= 1) : (dx += 1) {
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z() - 1), light_position, light_color, is_test_cast);
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z()), light_position, light_color, is_test_cast);
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z() + 1), light_position, light_color, is_test_cast);
+
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y(), voxel_index.z() - 1), light_position, light_color, is_test_cast);
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y(), voxel_index.z()), light_position, light_color, is_test_cast);
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y(), voxel_index.z() + 1), light_position, light_color, is_test_cast);
+
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y() + 1, voxel_index.z() - 1), light_position, light_color, is_test_cast);
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y() + 1, voxel_index.z()), light_position, light_color, is_test_cast);
+                spamVoxel(solution, .new(voxel_index.x() + dx, voxel_index.y() + 1, voxel_index.z() + 1), light_position, light_color, is_test_cast);
+            }
+        }
+    }
+}
+
 pub fn endLightingComputation(
     solution: *LightingSolution,
     group: *RenderGroup,
@@ -996,7 +1292,7 @@ pub fn endLightingComputation(
     const setup: *RenderSetup = &group.last_setup;
     const commands: *RenderCommands = group.commands;
     const hot_dimension: u32 = commands.light_voxel_dimension;
-    const large_dimension: u32 = LIGHT_LARGE_VOXEL_DIM;
+    // const large_dimension: u32 = LIGHT_LARGE_VOXEL_DIM;
     const inverse_hot_dimension: Vector3 = Vector3.fromV3u(.splat(hot_dimension)).divideFByMe(1);
 
     solution.light_probe_count = commands.light_probe_count;
@@ -1052,115 +1348,10 @@ pub fn endLightingComputation(
         const light4_uvw: Vector3 =
             voxel_inverse_total_dimension.hadamardProduct(light_position4.minus(setup.voxel_min_corner));
 
-        var work: LightingWork = .{
-            .solution = solution,
-            .first_light_probe_index = 0,
-            .one_past_last_light_probe_index = 0,
-        };
-
-        {
-            var z: u32 = 0;
-            while (z < large_dimension) : (z += 1) {
-                var y: u32 = 0;
-                while (y < large_dimension) : (y += 1) {
-                    var x: u32 = 0;
-                    while (x < large_dimension) : (x += 1) {
-                        var light_normal0: Vector3 = .zero();
-                        var light_color0: Color3 = .zero();
-
-                        if (true) {
-                            const voxel_center_position: Vector3 = solution.voxel_min_corner_large.plus(
-                                Vector3.newU(x, y, z).plus(.splat(0.5)).hadamardProduct(solution.voxel_cell_dimension),
-                            );
-
-                            var light_normal: Vector3 = light_position.minus(voxel_center_position);
-                            const light_distance: f32 = light_normal.length();
-                            light_normal = light_normal.normalizeOrZero();
-
-                            var light_distance_falloff: f32 = math.clampf01(1.0 - 0.12 * light_distance);
-
-                            if (true) {
-                                const voxel_center_position4x: V3_4x = .fromVector3(voxel_center_position);
-                                const light_normal4x: V3_4x = .fromVector3(light_normal);
-
-                                const is_test_cast: bool = false;
-
-                                // const is_test_cast: bool =
-                                //     x >= (solution.hot_corner_i.x() + hot_dimension / 2 - 4) and
-                                //     y >= (solution.hot_corner_i.y() + hot_dimension / 2 - 4) and
-                                //     z >= (solution.hot_corner_i.z() + hot_dimension / 2 - 4) and
-                                //     x < (solution.hot_corner_i.x() + hot_dimension / 2 + 4) and
-                                //     y < (solution.hot_corner_i.y() + hot_dimension / 2 + 4) and
-                                //     z < (solution.hot_corner_i.z() + hot_dimension / 2 + 4);
-
-                                // const is_test_cast: bool =
-                                //     x == (solution.hot_corner_i.x() + hot_dimension / 2 + 3) and
-                                //     y == (solution.hot_corner_i.y() + hot_dimension / 2 - 2) and
-                                //     z == (solution.hot_corner_i.z() + hot_dimension / 2 + 2);
-
-                                const cast: RaycastResult = raycast(&work, voxel_center_position4x, light_normal4x, false);
-                                const hit: bool = cast.t_ray[0] < light_distance;
-                                const line_color: Color = if (hit) .new(1, 1, 0, 1) else .new(0, 0, 0, 1);
-                                if (true) {
-                                    var cast_position: Vector3 = cast.position.getComponent(0);
-
-                                    if (!hit) {
-                                        cast_position = voxel_center_position.plus(light_normal.scaledTo(light_distance));
-                                    }
-
-                                    if (is_test_cast) {
-                                        pushDebugLine(
-                                            solution,
-                                            voxel_center_position,
-                                            cast_position,
-                                            line_color,
-                                        );
-                                        pushDebugLine(
-                                            solution,
-                                            voxel_center_position,
-                                            voxel_center_position.plus(.new(0, 0, 0.025)),
-                                            .new(0, 1, 1, 1),
-                                        );
-                                        pushDebugLine(
-                                            solution,
-                                            voxel_center_position,
-                                            voxel_center_position.plus(light_normal.scaledTo(0.1)),
-                                            .new(1, 0, 1, 1),
-                                        );
-                                    }
-
-                                    if (hit) {
-                                        light_distance_falloff = 0;
-                                    }
-                                }
-                            }
-
-                            // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
-                            // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
-                            const light_alpha: f32 = math.lerpf(
-                                0.4 * MAX_LIGHT_INTENSITY,
-                                0.75 * MAX_LIGHT_INTENSITY,
-                                light_distance_falloff,
-                            );
-
-                            light_normal0 = light_normal;
-                            light_color0 = Color3.new(1, 1, 1).scaledTo(light_alpha);
-                        } else {
-                            light_normal0 = Vector3.new(1, 1, 1).normalizeOrZero();
-                            light_color0 = .zero();
-
-                            if (((x & 1) ^ (y & 1) ^ (z & 1)) != 0) {
-                                light_color0 = .new(10, 10, 10);
-                            } else {
-                                light_color0 = .new(7, 7, 7);
-                            }
-                        }
-
-                        solution.cells[z][y][x].light_normal[0] = light_normal0;
-                        solution.cells[z][y][x].light_color[0] = light_color0;
-                    }
-                }
-            }
+        if (false) {
+            frumbledyGok(solution);
+        } else {
+            testCastFromProbes(solution);
         }
 
         var z: u32 = 0;

@@ -693,7 +693,7 @@ pub fn updateAndRenderWorld(
                 input.frame_delta_time,
                 camera_z,
             );
-            world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
+            world_mode.debug_light_position = camera_following_entity.ground_position.plus(.new(0, 0, 0.5));
         }
 
         if (false) {

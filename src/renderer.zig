@@ -538,6 +538,17 @@ pub const RenderGroup = extern struct {
         self.light_bounds = light_bounds;
     }
 
+    pub fn pushLightProbe(self: *RenderGroup, position: Vector3) void {
+        const commands: *RenderCommands = self.commands;
+
+        if (commands.light_probe_count < commands.max_light_probe_count) {
+            commands.light_probe_position[commands.light_probe_count] = position;
+            commands.light_probe_count += 1;
+        } else {
+            @panic("Out of light probe slots");
+        }
+    }
+
     pub fn setLightProbePosition(self: *RenderGroup, light_probe_index: u32, position: Vector3, clear: bool) void {
         const commands: *RenderCommands = self.commands;
 
