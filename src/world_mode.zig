@@ -693,18 +693,10 @@ pub fn updateAndRenderWorld(
                 input.frame_delta_time,
                 camera_z,
             );
-            world_mode.debug_light_position = camera_following_entity.ground_position.plus(.new(0, 0, 0.5));
+            world_mode.debug_light_position = camera_following_entity.ground_position.plus(.new(0, 0, 0.75));
         }
 
-        if (false) {
-            asset_rendering.pushCubeLight(
-                &render_group,
-                world_mode.debug_light_position,
-                .splat(0.5),
-                .new(1, 1, 1),
-                1,
-            );
-        }
+        render_group.pushLight(world_mode.debug_light_position, .splat(0.5), .new(1, 1, 1));
 
         const frame_to_frame_camera_delta_position: Vector3 =
             world.subtractPositions(world_mode.world, &world_mode.camera.simulation_center, &last_camera_position);

@@ -44,6 +44,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const TicketMutex = types.TicketMutex;
 const HHABitmap = file_formats.HHABitmap;
+const V3_4x = simd.V3_4x;
 const ArenaPushParams = shared.ArenaPushParams;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
@@ -234,16 +235,11 @@ pub const LightingBox = extern struct {
     position: Vector3,
     radius: Vector3,
     reflection_color: Color3,
-    emission: f32,
-    texture_index: u32,
 
     // TODO: Do we really want in-line spatial hierarchy like this? It seems like it could just be out-of-band.
-    child_count: u16 = 0,
     first_child_index: u16,
-};
-
-pub const LightProbeIrradiance = extern struct {
-    light: [6]Color3,
+    child_count: u8 = 0,
+    is_light: u8 = 0,
 };
 
 pub const RenderCommands = extern struct {
@@ -270,8 +266,6 @@ pub const RenderCommands = extern struct {
     max_light_probe_count: u32,
     light_probe_count: u32,
     light_probe_position: [*]Vector3, // [max_light_probe_count]
-    // TODO: Encode light_probe_irradiance as u32s.
-    light_probe_irradiance: [*]LightProbeIrradiance, // [max_light_probe_count]
 
     light_voxel_dimension: u32,
     light_voxel_color: [LIGHT_DIRECTION_COUNT][*]u32, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
@@ -544,24 +538,6 @@ pub const RenderGroup = extern struct {
         if (commands.light_probe_count < commands.max_light_probe_count) {
             commands.light_probe_position[commands.light_probe_count] = position;
             commands.light_probe_count += 1;
-        } else {
-            @panic("Out of light probe slots");
-        }
-    }
-
-    pub fn setLightProbePosition(self: *RenderGroup, light_probe_index: u32, position: Vector3, clear: bool) void {
-        const commands: *RenderCommands = self.commands;
-
-        if (light_probe_index < commands.max_light_probe_count) {
-            if (commands.light_probe_count < (light_probe_index + 1)) {
-                commands.light_probe_count = (light_probe_index + 1);
-            }
-
-            commands.light_probe_position[light_probe_index] = position;
-
-            if (clear) {
-                memory.zeroStruct(LightProbeIrradiance, &commands.light_probe_irradiance[light_probe_index]);
-            }
         } else {
             @panic("Out of light probe slots");
         }
@@ -968,8 +944,28 @@ pub const RenderGroup = extern struct {
             box.position = position;
             box.radius = radius;
             box.reflection_color = color.rgb();
-            box.emission = 0;
-            box.texture_index = 0;
+            box.is_light = 0;
+            box.child_count = 0;
+            box.first_child_index = 0;
+        }
+    }
+
+    pub fn pushLight(
+        self: *RenderGroup,
+        position: Vector3,
+        radius: Vector3,
+        emission: Color3,
+    ) void {
+        const commands: *RenderCommands = self.commands;
+        if (self.lighting_enabled) {
+            std.debug.assert(commands.light_occluder_count < commands.max_light_occluder_count);
+            const box: *LightingBox = &commands.light_occluders[commands.light_occluder_count];
+            commands.light_occluder_count += 1;
+
+            box.position = position;
+            box.radius = radius;
+            box.reflection_color = emission;
+            box.is_light = 1;
             box.child_count = 0;
             box.first_child_index = 0;
         }

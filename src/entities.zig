@@ -569,12 +569,11 @@ pub fn updateAndRenderEntities(
                     const highlighted: bool = dev_id.equals(hit_test.highlight_id);
 
                     if (piece.flags & @backingInt(EntityVisiblePieceFlag.Light) != 0) {
-                        asset_rendering.pushCubeLight(
-                            render_group,
+                        // TODO: Probably can just use RBG for emission, and encode that when we creat the entity.
+                        render_group.pushLight(
                             entity_ground_point.plus(piece.offset),
                             piece.dimension,
-                            color.rgb(),
-                            color.a(),
+                            color.rgb().scaledTo(color.a()),
                         );
                     } else if (piece.flags & @backingInt(EntityVisiblePieceFlag.Cube) != 0) {
                         const cube_position = entity_ground_point.plus(piece.offset);

@@ -406,7 +406,6 @@ pub const OpenGL = extern struct {
     final_stretch: OpenGLProgramCommon = undefined,
     resolve_multisample: ResolveMultisampleProgram = undefined,
 
-    light_probe_irradiance: [MAX_LIGHT_PROBE_COUNT]renderer.LightProbeIrradiance = undefined,
     light_probe_position: [MAX_LIGHT_PROBE_COUNT]Vector3 = undefined,
     light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
 
@@ -1941,7 +1940,6 @@ pub fn beginFrame(
 
     commands.max_light_probe_count = MAX_LIGHT_PROBE_COUNT;
     commands.light_probe_count = 0;
-    commands.light_probe_irradiance = &open_gl.light_probe_irradiance;
     commands.light_probe_position = &open_gl.light_probe_position;
 
     commands.light_voxel_dimension = LIGHT_LOOKUP_VOXEL_DIM;

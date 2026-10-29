@@ -254,21 +254,3 @@ pub fn pushCubeBitmapId(
         }
     }
 }
-
-pub fn pushCubeLight(
-    group: *RenderGroup,
-    position: Vector3,
-    radius: Vector3,
-    color: Color3,
-    emission: f32,
-) void {
-    group.pushCube(
-        group.white_texture,
-        position,
-        radius,
-        color.toColor(0),
-        null,
-        emission,
-        null,
-    );
-}
