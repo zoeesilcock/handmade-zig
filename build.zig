@@ -608,6 +608,5 @@ fn addGenerateSamplingSpheres(
     const run_generate_sampling_spheres = b.addRunArtifact(generate_sampling_spheres_exe);
     run_generate_sampling_spheres.addPassthruArgs();
     const generate_sampling_spheres_run_step = b.step("generate-sampling-spheres", "Run the generate sampling spheres tool");
-    run_generate_sampling_spheres.setCwd(b.path("data/"));
     generate_sampling_spheres_run_step.dependOn(&run_generate_sampling_spheres.step);
 }

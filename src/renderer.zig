@@ -232,6 +232,7 @@ pub const RendererTexture = extern union {
 };
 
 pub const LightingBox = extern struct {
+    // TODO: It may be that min/max is a better thing than position/radius, so we should look at that and see.
     position: Vector3,
     radius: Vector3,
     reflection_color: Color3,

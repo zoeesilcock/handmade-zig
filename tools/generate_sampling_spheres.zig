@@ -8,13 +8,8 @@ const random = shared.random;
 const Vector3 = math.Vector3;
 const V3_4x = simd.V3_4x;
 
-const CubeStore = struct {
-    weights: [6]f32 = @splat(0),
-};
-
 const SphereStore = struct {
     sample_direction: []V3_4x = undefined,
-    weights: []CubeStore = undefined,
 };
 
 fn generatePoissonSamples(series: *random.Series, dest_count: u32, dest: [*]Vector3) void {
@@ -171,18 +166,6 @@ pub fn generateLightingPattern(
                 direction_from[3],
             );
             direction_from.ptr += 4;
-
-            var bundle_component: u32 = 0;
-            while (bundle_component < 4) : (bundle_component += 1) {
-                const weight_index: u32 = 4 * bundle_index + bundle_component;
-
-                sphere.weights[weight_index].weights[0] = 0;
-                sphere.weights[weight_index].weights[1] = 0;
-                sphere.weights[weight_index].weights[2] = 0;
-                sphere.weights[weight_index].weights[3] = 0;
-                sphere.weights[weight_index].weights[4] = 0;
-                sphere.weights[weight_index].weights[5] = 0;
-            }
         }
     }
     std.log.info("\n", .{});
@@ -205,7 +188,6 @@ fn outputSpheres(
     try writer.print("pub const LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE = 4 * LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE;\n", .{});
     try writer.print("pub const LightSamplingSphere = struct {{\n", .{});
     try writer.print("    sample_direction: [LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE]V3_4x = @splat(.splat(@splat(0))),\n", .{});
-    try writer.print("    cube_side_weight: [LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE][6]f32 = @splat(@splat(0)),\n", .{});
     try writer.print("}};\n\n", .{});
 
     try writer.print("pub var light_sampling_sphere_table: [LIGHT_SAMPLING_SPHERE_COUNT]LightSamplingSphere = .{{\n", .{});
@@ -241,26 +223,6 @@ fn outputSpheres(
             );
         }
         try writer.print("        }},\n", .{});
-
-        try writer.print("        .cube_side_weight = .{{\n", .{});
-        var weight_bundle: u32 = 0;
-        while (weight_bundle < 4 * ray_bundles_per_sphere) : (weight_bundle += 1) {
-            const cube: CubeStore = sphere.weights[weight_bundle];
-
-            try writer.print(
-                "            .{{ {d}, {d}, {d}, {d}, {d}, {d} }},\n",
-                .{
-                    cube.weights[0],
-                    cube.weights[1],
-                    cube.weights[2],
-                    cube.weights[3],
-                    cube.weights[4],
-                    cube.weights[5],
-                },
-            );
-        }
-        try writer.print("        }},\n", .{});
-
         try writer.print("    }},\n", .{});
     }
 
@@ -282,7 +244,6 @@ pub fn main(init: std.process.Init) !void {
         while (sphere_index < light_sampling_sphere_count) : (sphere_index += 1) {
             var sphere: *SphereStore = &spheres[sphere_index];
             sphere.sample_direction = try allocator.alloc(V3_4x, ray_bundles_per_sphere);
-            sphere.weights = try allocator.alloc(CubeStore, ray_bundles_per_sphere * 4);
         }
 
         try generateLightingPattern(light_sampling_sphere_count, ray_bundles_per_sphere, spheres, allocator);

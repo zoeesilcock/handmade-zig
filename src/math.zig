@@ -375,6 +375,15 @@ pub fn isInRectangleCenterHalfDim(position: Vector3, radius: Vector3, test_point
     return result;
 }
 
+pub fn getClosestPointInBox(box: Rectangle3, position: Vector3) Vector3 {
+    return box.max.min(box.min.max(position));
+}
+
+pub fn getDistanceToBoxSquared(box: Rectangle3, position: Vector3) f32 {
+    const closest_point = getClosestPointInBox(box, position);
+    return position.minus(closest_point).lengthSquared();
+}
+
 fn Vector4Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();

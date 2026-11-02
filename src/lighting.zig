@@ -66,11 +66,6 @@ const TEST_LIGHT_TRANSFER = true;
 
 const SLOW = shared.SLOW;
 
-const LightVoxelCell = struct {
-    light_color: [LIGHT_DIRECTION_COUNT]Color3,
-    light_normal: [LIGHT_DIRECTION_COUNT]Vector3,
-};
-
 pub const LightingSolution = struct {
     // TODO: We probably want to convert this system to one that actually uses a permanent box array where entities
     // just write their box position directly into the cache in a known location, rather than generating the entire
@@ -80,10 +75,12 @@ pub const LightingSolution = struct {
 
     scratch_a: [LIGHT_DATA_WIDTH]u16 = @splat(0),
     scratch_b: [LIGHT_DATA_WIDTH]u16 = @splat(0),
+    scratch_c: [LIGHT_DATA_WIDTH]u16 = @splat(0),
 
     box_reference_count: u16 = 0,
     box_table: [LIGHT_DATA_WIDTH]u16 = @splat(0),
     root_box_index: u16,
+    root_light_box_index: u16,
 
     series: random.Series,
 
@@ -118,8 +115,6 @@ pub const LightingSolution = struct {
     cells: [LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM]LightVoxelCell,
 
     debug_light_position: Vector3,
-
-    light_box_target_position: [LIGHT_DATA_WIDTH]V3_4x,
 };
 
 const LightingWork = extern struct {
@@ -132,6 +127,18 @@ const LightingWork = extern struct {
     total_partition_leaves_used: u32 = 0, // Number of partition boxes used as leaves.
     total_leaves_tested: u32 = 0, // Number of leaf boxes checked.
     big_pad: [32]u8 = undefined,
+};
+
+const LightNode = struct {
+    position: Vector3,
+    radius: Vector3,
+    emission: Color3,
+    child: [2]u32,
+};
+
+const LightVoxelCell = struct {
+    light_color: [LIGHT_DIRECTION_COUNT]Color3,
+    light_normal: [LIGHT_DIRECTION_COUNT]Vector3,
 };
 
 const DebugLine = extern struct {
@@ -420,28 +427,33 @@ fn pushDebugBox(solution: *LightingSolution, box_min: Vector3, box_max: Vector3,
     );
 }
 
-fn getSpatialLeafForPosition(solution: *LightingSolution, position: Vector3) u32 {
-    var result: u32 = 0;
+fn getLightLeafForPosition(solution: *LightingSolution, position: Vector3, is_test_case: bool) *LightingBox {
+    // This does not actually guaranteee you the closest light source.
+    var result: *LightingBox = getBox(solution, solution.root_light_box_index);
+    while (result.child_count > 0) {
+        const first_child_index: u32 = result.first_child_index;
+        const one_past_last_index: u32 = first_child_index + result.child_count;
 
-    var parent: ?*LightingBox = getBox(solution, solution.root_box_index);
-    while (parent != null and result == 0) {
-        const first_child_index: u32 = parent.?.first_child_index;
-        const one_past_last_index: u32 = first_child_index + parent.?.child_count;
-        parent = null;
-
+        var closest_distance_squared: f32 = std.math.floatMax(f32);
         var source_index: u32 = first_child_index;
         while (source_index < one_past_last_index) : (source_index += 1) {
             const box: *LightingBox = getBox(solution, source_index);
-
-            if (position.isInRectangle(.fromCenterHalfDimension(box.position, box.radius))) {
-                if (box.child_count > 0) {
-                    parent = box;
-                } else {
-                    result = source_index;
-                    return result;
-                }
-                break;
+            const extents: Rectangle3 = .fromCenterHalfDimension(box.position, box.radius);
+            const closest_point = math.getClosestPointInBox(extents, position);
+            if (is_test_case) {
+                pushDebugLine(solution, position, closest_point, .new(1, 1, 1, 0.5));
+                pushDebugBox(solution, extents.min, extents.max, .new(1, 1, 1, 0.5));
             }
+            const this_distance_squared: f32 = position.minus(closest_point).lengthSquared();
+            if (closest_distance_squared > this_distance_squared) {
+                closest_distance_squared = this_distance_squared;
+                result = box;
+            }
+        }
+
+        if (is_test_case) {
+            const extents: Rectangle3 = .fromCenterHalfDimension(result.position, result.radius);
+            pushDebugBox(solution, extents.min, extents.max, .new(1, 1, 0, 1));
         }
     }
 
@@ -465,6 +477,8 @@ fn getVoxelCenterPosition(solution: *LightingSolution, index: Vector3i) Vector3 
 }
 
 fn computeVoxelIrradianceAt(solution: *LightingSolution, sample_position: Vector3, sample_normal: Vector3) Color3 {
+    // TODO: Actually sample the voxel lighting here the same way we do in the pixel shader.
+
     _ = solution;
     _ = sample_position;
     _ = sample_normal;
@@ -483,6 +497,7 @@ pub fn computeLightPropagationWork(queue: shared.PlatformWorkQueuePtr, data: *an
 
     var series: random.Series = solution.series;
     const sample_point_entropy: u32 = series.randomInt();
+    const light_point_entropy: u32 = series.randomInt();
 
     // TOOD: Make this procedurla in some way, since we don\t want to add moonlight in areas that aren't outside.
     const moon_color: Color3 = .new(0.1, 0.8, 1.0).scaledTo(0.4);
@@ -506,8 +521,13 @@ pub fn computeLightPropagationWork(queue: shared.PlatformWorkQueuePtr, data: *an
         const ray_bundle_count: u32 = sampling_sphere.sample_direction.len;
         // const ray_weight: f32 = 6 / @as(f32, @floatFromInt(ray_bundle_count));
 
-        const direction_to_light: Vector3 = solution.debug_light_position.minus(light_probe_position).normalizeOrZero();
-        var ray_direction: V3_4x = .fromVector3(direction_to_light);
+        const n_closest_lights: [8]*LightingBox = undefined;
+        //findClosestLights(&n_closest_lights);
+        const bias_towards_light: *LightingBox = n_closest_lights[light_probe_index + light_point_entropy & 7];
+
+        // TODO: Actually pick four random points on the light volume.
+        const point_on_light: V3_4x = .fromVector3(bias_towards_light.position);
+        var ray_direction: V3_4x = point_on_light.minus(ray_origin);
         const light_position: Vector3 = .new(0, 0, 0);
         const light_color: Color3 = .new(0, 0, 0);
 
@@ -515,6 +535,7 @@ pub fn computeLightPropagationWork(queue: shared.PlatformWorkQueuePtr, data: *an
         var total_power: f32 = 0;
 
         var ray_bundle_index: u32 = 0;
+        // TODO: Add padding and increase by one to account for the extra slot used by the light bias.
         while (ray_bundle_index < ray_bundle_count) : (ray_bundle_index += 1) {
             const ray: RaycastResult = raycast(work, ray_origin, ray_direction, false);
             const t_hit: F32_4x = @as(F32_4x, @splat(std.math.floatMax(f32))) != ray.t_ray;
@@ -707,6 +728,8 @@ fn splitBox(
                 var count_b: u16 = 0;
                 var bounds_a: Rectangle3 = Rectangle3.invertedInfinity();
                 var bounds_b: Rectangle3 = Rectangle3.invertedInfinity();
+                var reflection_color_a: Color3 = .zero();
+                var reflection_color_b: Color3 = .zero();
 
                 var source_index: u16 = 0;
                 while (source_index < source_count) : (source_index += 1) {
@@ -717,10 +740,12 @@ fn splitBox(
                     if (class_direction.dotProduct(box.position) < class_distance) {
                         dest[count_a] = box_reference;
                         bounds_a = bounds_a.getUnionWith(&box_rect);
+                        reflection_color_a = reflection_color_a.plus(box.reflection_color);
                         count_a += 1;
                     } else {
                         dest[(source_count - 1) - count_b] = box_reference;
                         bounds_b = bounds_b.getUnionWith(&box_rect);
+                        reflection_color_b = reflection_color_b.plus(box.reflection_color);
                         count_b += 1;
                     }
                 }
@@ -732,12 +757,14 @@ fn splitBox(
                     var child_box_a: *LightingBox = @ptrCast(solution.boxes + child_box_a_at);
                     child_box_a.position = bounds_a.getCenter();
                     child_box_a.radius = bounds_a.getRadius();
+                    child_box_a.reflection_color = reflection_color_a.scaledTo(1 / @as(f32, @floatFromInt(count_a)));
                     splitBox(solution, child_box_a, count_a, dest, source, next_dimension_index);
 
                     const child_box_b_at: u16 = addBoxStorage(solution);
                     var child_box_b: *LightingBox = @ptrCast(solution.boxes + child_box_b_at);
                     child_box_b.position = bounds_b.getCenter();
                     child_box_b.radius = bounds_b.getRadius();
+                    child_box_b.reflection_color = reflection_color_b.scaledTo(1 / @as(f32, @floatFromInt(count_b)));
                     splitBox(solution, child_box_b, count_b, dest + count_a, source, next_dimension_index);
 
                     source_count = 2;
@@ -757,32 +784,60 @@ fn splitBox(
     parent_box.first_child_index = addBoxReferences(solution, source_count, source);
 }
 
+fn calculateReflectionColor(solution: *LightingSolution, root_box: *LightingBox) void {
+    var reflection_color: Color3 = .zero();
+
+    if (root_box.child_count > 0) {
+        var source_index: u32 = root_box.first_child_index;
+        while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
+            const box: *LightingBox = getBox(solution, source_index);
+
+            reflection_color = reflection_color.plus(box.reflection_color);
+        }
+
+        reflection_color = reflection_color.scaledTo(1 / @as(f32, @floatFromInt(root_box.child_count)));
+    }
+
+    root_box.reflection_color = reflection_color;
+}
+
 fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
     TimedBlock.beginFunction(@src(), .BuildSpatialPartitionForLighting);
     defer TimedBlock.endFunction(@src(), .BuildSpatialPartitionForLighting);
 
     const actual_box_count: u16 = solution.box_count;
+    var actual_light_count: u16 = 0;
 
-    var bounds: Rectangle3 = Rectangle3.invertedInfinity();
+    var occluder_bounds: Rectangle3 = Rectangle3.invertedInfinity();
+    var light_bounds: Rectangle3 = Rectangle3.invertedInfinity();
     var box_index: u16 = 0;
-    while (box_index < solution.box_count) : (box_index += 1) {
+    while (box_index < actual_box_count) : (box_index += 1) {
         const box: *LightingBox = @ptrCast(solution.boxes + box_index);
         solution.scratch_a[box_index] = box_index;
         var box_rect: Rectangle3 = Rectangle3.fromCenterHalfDimension(box.position, box.radius);
-        bounds = bounds.getUnionWith(&box_rect);
+        occluder_bounds = occluder_bounds.getUnionWith(&box_rect);
+        if (box.is_light != 0) {
+            light_bounds = light_bounds.getUnionWith(&box_rect);
+            solution.scratch_c[actual_light_count] = box_index;
+            actual_light_count += 1;
+        }
     }
 
     solution.root_box_index = addBoxReference(solution, addBoxStorage(solution));
     const root_box: *LightingBox = getBox(solution, solution.root_box_index);
-    root_box.position = bounds.getCenter();
-    root_box.radius = bounds.getRadius();
+    root_box.position = occluder_bounds.getCenter();
+    root_box.radius = occluder_bounds.getRadius();
+
+    solution.root_light_box_index = addBoxReference(solution, addBoxStorage(solution));
+    const root_light_box: *LightingBox = getBox(solution, solution.root_light_box_index);
+    root_light_box.position = light_bounds.getCenter();
+    root_light_box.radius = light_bounds.getRadius();
 
     splitBox(solution, root_box, actual_box_count, &solution.scratch_a, &solution.scratch_b, 0);
+    splitBox(solution, root_light_box, actual_light_count, &solution.scratch_c, &solution.scratch_b, 0);
 
-    box_index = 0;
-    while (box_index < solution.box_count) : (box_index += 1) {
-        solution.light_box_target_position[box_index] = .fromVector3(solution.debug_light_position);
-    }
+    calculateReflectionColor(solution, root_box);
+    calculateReflectionColor(solution, root_light_box);
 }
 
 fn irradiancePack(light_intensity: Color3) u32 {
@@ -851,6 +906,8 @@ pub fn beginLightingComputation(
         // solution.voxel_min_corner_large = solution.voxel_min_corner_hot.minus(
         //     solution.voxel_cell_dimension.hadamardProduct(solution.hot_corner_i.fromV3u()),
         // );
+
+        // TODO: Copy contents of the old voxel to the correct location in the new voxel.
 
         solution.voxel_min_corner_hot = hot_dimension.scaledTo(0.5).negated();
         solution.voxel_min_corner_large = solution.voxel_min_corner_hot.minus(
@@ -1149,13 +1206,14 @@ fn testCastFromProbes(
         }
     }
 
+    _ = getLightLeafForPosition(solution, solution.debug_light_position, true);
+
     var light_probe_index: u32 = 0;
     while (light_probe_index < solution.light_probe_count) : (light_probe_index += 1) {
         const cast_position: Vector3 = solution.light_probe_position[light_probe_index];
 
-        const leaf_index = getSpatialLeafForPosition(solution, cast_position);
-        const light_position: Vector3 = solution.light_box_target_position[leaf_index].getComponent(0);
-        // const light_position: Vector3 = solution.debug_light_position;
+        const light_box: *LightingBox = getLightLeafForPosition(solution, cast_position, false);
+        const light_position: Vector3 = light_box.position;
         const light_color: Color3 = .new(1, 1, 1);
 
         var cast_direction: Vector3 = light_position.minus(cast_position);
