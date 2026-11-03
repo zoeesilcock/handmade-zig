@@ -95,6 +95,9 @@ pub const LightingSolution = struct {
     debug_line_count: u32,
     debug_lines: [65535]DebugLine = undefined,
 
+    irradiance_blend_u: f32,
+    irradiance_blend_v: f32,
+
     accumulation_count: f32 = 0,
     accumulating: bool = false,
 
@@ -115,6 +118,8 @@ pub const LightingSolution = struct {
     cells: [LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM]LightVoxelCell,
 
     debug_light_position: Vector3,
+
+    last_origin_position: WorldPosition,
 };
 
 const LightingWork = extern struct {
@@ -137,8 +142,12 @@ const LightNode = struct {
 };
 
 const LightVoxelCell = struct {
-    light_color: [LIGHT_DIRECTION_COUNT]Color3,
-    light_normal: [LIGHT_DIRECTION_COUNT]Vector3,
+    light_color: [LIGHT_DIRECTION_COUNT]Color3 = @splat(.zero()),
+    light_normal: [LIGHT_DIRECTION_COUNT]Vector3 = @splat(.zero()),
+
+    total_weight: f32 = 0,
+    light_color_accumulator: Color3 = .zero(),
+    light_normal_accumulator: Vector3 = .zero(),
 };
 
 const DebugLine = extern struct {
@@ -877,14 +886,140 @@ pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena, fundamenta
     solution.update_debug_lines = true;
 }
 
+fn blockCopyVoxel(solution: *LightingSolution, delta_voxel: Vector3i) void {
+    if (false) {
+        const zero_cell: LightVoxelCell = .{};
+        var z: u32 = 0;
+        while (z < LIGHT_LARGE_VOXEL_DIM) : (z += 1) {
+            var y: u32 = 0;
+            while (y < LIGHT_LARGE_VOXEL_DIM) : (y += 1) {
+                var x: u32 = 0;
+                while (x < LIGHT_LARGE_VOXEL_DIM) : (x += 1) {
+                    const sample_x: u32 = x + @as(u32, @intCast(delta_voxel.x()));
+                    const sample_y: u32 = y + @as(u32, @intCast(delta_voxel.y()));
+                    const sample_z: u32 = z + @as(u32, @intCast(delta_voxel.z()));
+
+                    solution.cells[z][y][x] =
+                        if (sample_x < LIGHT_LARGE_VOXEL_DIM and
+                        sample_y < LIGHT_LARGE_VOXEL_DIM and
+                        sample_z < LIGHT_LARGE_VOXEL_DIM)
+                            solution.cells[sample_z][sample_y][sample_x]
+                        else
+                            zero_cell;
+                }
+            }
+        }
+    } else {
+        var dx: i32 = 0;
+        var stop_x: i32 = 0;
+        var initial_x: i32 = 0;
+        var final_x: i32 = 0;
+        if (delta_voxel.x() < 0) {
+            dx = -1;
+            stop_x = -delta_voxel.x() + dx;
+            initial_x = LIGHT_LARGE_VOXEL_DIM - 1;
+            final_x = 0 + dx;
+        } else {
+            dx = 1;
+            stop_x = LIGHT_LARGE_VOXEL_DIM - 1 - delta_voxel.x();
+            initial_x = 0;
+            final_x = LIGHT_LARGE_VOXEL_DIM;
+        }
+
+        var dy: i32 = 0;
+        var stop_y: i32 = 0;
+        var initial_y: i32 = 0;
+        var final_y: i32 = 0;
+        if (delta_voxel.y() < 0) {
+            dy = -1;
+            stop_y = -delta_voxel.y() + dy;
+            initial_y = LIGHT_LARGE_VOXEL_DIM - 1;
+            final_y = 0 + dy;
+        } else {
+            dy = 1;
+            stop_y = LIGHT_LARGE_VOXEL_DIM - 1 - delta_voxel.y();
+            initial_y = 0;
+            final_y = LIGHT_LARGE_VOXEL_DIM;
+        }
+
+        var dz: i32 = 0;
+        var stop_z: i32 = 0;
+        var initial_z: i32 = 0;
+        var final_z: i32 = 0;
+        if (delta_voxel.z() < 0) {
+            dz = -1;
+            stop_z = -delta_voxel.z() + dz;
+            initial_z = LIGHT_LARGE_VOXEL_DIM - 1;
+            final_z = 0 + dz;
+        } else {
+            dz = 1;
+            stop_z = LIGHT_LARGE_VOXEL_DIM - 1 - delta_voxel.z();
+            initial_z = 0;
+            final_z = LIGHT_LARGE_VOXEL_DIM;
+        }
+
+        var z: i32 = initial_z;
+        while (z != stop_z) : (z += dz) {
+            var y: i32 = initial_y;
+            while (y != stop_y) : (y += dy) {
+                var x: i32 = initial_x;
+                while (x != stop_x) : (x += dx) {
+                    solution.cells[@intCast(z)][@intCast(y)][@intCast(x)] =
+                        solution.cells[@intCast(z + delta_voxel.z())][@intCast(y + delta_voxel.y())][@intCast(x + delta_voxel.x())];
+                }
+
+                while (x != final_x) : (x += dx) {
+                    memory.zeroStruct(LightVoxelCell, &solution.cells[@intCast(z)][@intCast(y)][@intCast(x)]);
+                }
+            }
+
+            while (y != final_y) : (y += dy) {
+                var inner_x: i32 = 0;
+                while (inner_x < LIGHT_LARGE_VOXEL_DIM) : (inner_x += 1) {
+                    memory.zeroStruct(LightVoxelCell, &solution.cells[@intCast(z)][@intCast(y)][@intCast(inner_x)]);
+                }
+            }
+        }
+
+        while (z != final_z) : (z += dz) {
+            var inner_y: i32 = 0;
+            while (inner_y < LIGHT_LARGE_VOXEL_DIM) : (inner_y += 1) {
+                var inner_x: i32 = 0;
+                while (inner_x < LIGHT_LARGE_VOXEL_DIM) : (inner_x += 1) {
+                    memory.zeroStruct(LightVoxelCell, &solution.cells[@intCast(z)][@intCast(inner_y)][@intCast(inner_x)]);
+                }
+            }
+        }
+    }
+}
+
 pub fn beginLightingComputation(
     solution: *LightingSolution,
     group: *RenderGroup,
+    world: *World,
     origin_position: WorldPosition,
     camera_offset_from_origin: Vector3,
     enable_lighting: bool,
 ) void {
     if (enable_lighting) {
+        const center_moved: bool = !world_mod.areInSameChunk(world, &solution.last_origin_position, &origin_position);
+        if (center_moved) {
+            const voxel_cells_per_chunk: Vector3i = .new(
+                @intFromFloat(world.chunk_dimension_in_meters.x() / solution.voxel_cell_dimension.x()),
+                @intFromFloat(world.chunk_dimension_in_meters.y() / solution.voxel_cell_dimension.y()),
+                @intFromFloat(world.chunk_dimension_in_meters.z() / solution.voxel_cell_dimension.z()),
+            );
+
+            const delta_chunk: Vector3i = .new(
+                origin_position.chunk_x - solution.last_origin_position.chunk_x,
+                origin_position.chunk_y - solution.last_origin_position.chunk_y,
+                origin_position.chunk_z - solution.last_origin_position.chunk_z,
+            );
+            const delta_voxel = voxel_cells_per_chunk.hadamardProduct(delta_chunk);
+            blockCopyVoxel(solution, delta_voxel);
+        }
+        solution.last_origin_position = origin_position;
+
         const large_cell_count: u32 = LIGHT_LARGE_VOXEL_DIM;
         const hot_cell_count: u32 = group.commands.light_voxel_dimension;
 
@@ -896,7 +1031,7 @@ pub fn beginLightingComputation(
 
         const inverse_hot_dimension: Vector3 = hot_dimension.divideFByMe(1);
 
-        _ = origin_position;
+        // _ = origin_position;
         _ = camera_offset_from_origin;
         // TODO: Should we just divid chunk_dumension_in_meters by some constant here, so that we know that the origin
         // is always aligned?
@@ -909,7 +1044,7 @@ pub fn beginLightingComputation(
 
         // TODO: Copy contents of the old voxel to the correct location in the new voxel.
 
-        solution.voxel_min_corner_hot = hot_dimension.scaledTo(0.5).negated();
+        solution.voxel_min_corner_hot = origin_position.offset.negated().minus(hot_dimension.scaledTo(0.5));
         solution.voxel_min_corner_large = solution.voxel_min_corner_hot.minus(
             @as(Vector3, .fromV3u(solution.hot_corner_i)).hadamardProduct(solution.voxel_cell_dimension),
         );
@@ -1092,8 +1227,14 @@ fn spamVoxelSlice(
         const light_color0: Color3 = light_color.scaledTo(light_alpha);
 
         const i: Vector3u = .new(@intCast(voxel_index.x()), @intCast(voxel_index.y()), @intCast(voxel_index.z()));
-        solution.cells[i.z()][i.y()][i.x()].light_normal[0] = light_normal0;
-        solution.cells[i.z()][i.y()][i.x()].light_color[0] = light_color0;
+
+        solution.cells[i.z()][i.y()][i.x()].total_weight += 1;
+
+        solution.cells[i.z()][i.y()][i.x()].light_color_accumulator =
+            solution.cells[i.z()][i.y()][i.x()].light_color_accumulator.plus(light_color0);
+
+        solution.cells[i.z()][i.y()][i.x()].light_normal_accumulator =
+            solution.cells[i.z()][i.y()][i.x()].light_normal_accumulator.plus(light_normal0);
     }
 }
 
@@ -1194,19 +1335,7 @@ fn testCastFromProbes(
         .one_past_last_light_probe_index = 0,
     };
 
-    var z: u32 = 0;
-    while (z < LIGHT_LARGE_VOXEL_DIM) : (z += 1) {
-        var y: u32 = 0;
-        while (y < LIGHT_LARGE_VOXEL_DIM) : (y += 1) {
-            var x: u32 = 0;
-            while (x < LIGHT_LARGE_VOXEL_DIM) : (x += 1) {
-                solution.cells[z][y][x].light_normal[0] = .zero();
-                solution.cells[z][y][x].light_color[0] = .zero();
-            }
-        }
-    }
-
-    _ = getLightLeafForPosition(solution, solution.debug_light_position, true);
+    // const light_box: *LightingBox = getLightLeafForPosition(solution, solution.debug_light_position, true);
 
     var light_probe_index: u32 = 0;
     while (light_probe_index < solution.light_probe_count) : (light_probe_index += 1) {
@@ -1260,6 +1389,36 @@ fn testCastFromProbes(
             spamVoxel(solution, cast_position, light_position, light_color, 0.05, is_test_cast);
         }
     }
+
+    var z: u32 = 0;
+    while (z < LIGHT_LARGE_VOXEL_DIM) : (z += 1) {
+        var y: u32 = 0;
+        while (y < LIGHT_LARGE_VOXEL_DIM) : (y += 1) {
+            var x: u32 = 0;
+            while (x < LIGHT_LARGE_VOXEL_DIM) : (x += 1) {
+                const normalization_coefficient = math.safeRatio0(1, solution.cells[z][y][x].total_weight);
+
+                const new_light_color: Color3 =
+                    solution.cells[z][y][x].light_color_accumulator.scaledTo(normalization_coefficient);
+                const new_light_normal: Vector3 =
+                    solution.cells[z][y][x].light_normal_accumulator.scaledTo(normalization_coefficient);
+
+                solution.cells[z][y][x].light_color[0] =
+                    solution.cells[z][y][x].light_color[0].scaledTo(solution.irradiance_blend_u);
+                solution.cells[z][y][x].light_normal[0] =
+                    solution.cells[z][y][x].light_normal[0].scaledTo(solution.irradiance_blend_u);
+
+                solution.cells[z][y][x].light_color[0] =
+                    solution.cells[z][y][x].light_color[0].plus(new_light_color.scaledTo(solution.irradiance_blend_v));
+                solution.cells[z][y][x].light_normal[0] =
+                    solution.cells[z][y][x].light_normal[0].plus(new_light_normal.scaledTo(solution.irradiance_blend_v));
+
+                solution.cells[z][y][x].total_weight = 0;
+                solution.cells[z][y][x].light_color_accumulator = .zero();
+                solution.cells[z][y][x].light_normal_accumulator = .zero();
+            }
+        }
+    }
 }
 
 pub fn endLightingComputation(
@@ -1292,17 +1451,17 @@ pub fn endLightingComputation(
     // we "derive" two coefficients, one for the multiplication at the end that renormalizes, and one for the new ray
     // contributions. This is to avoid pre-multiplying the existing probes in a first pass.
     const t_irradiance_preservation: f32 = 59.0 / 60.0;
-    var irradiance_blend_u: f32 = t_irradiance_preservation;
-    var irradiance_blend_v: f32 = (1 - irradiance_blend_u) / irradiance_blend_u;
+    solution.irradiance_blend_u = t_irradiance_preservation;
+    solution.irradiance_blend_v = (1 - solution.irradiance_blend_u) / solution.irradiance_blend_u;
 
     // When doing long-term accumulation for testing, we turn off the linear blend and instead just set the
     // coefficients for long-term averaging.
     if (solution.accumulating) {
-        irradiance_blend_u = 1;
+        solution.irradiance_blend_u = 1;
         if (solution.accumulation_count < LIGHT_TEST_ACCUMULATION_COUNT) {
-            irradiance_blend_v = 1.0 / @as(f32, @floatFromInt(LIGHT_TEST_ACCUMULATION_COUNT));
+            solution.irradiance_blend_v = 1.0 / @as(f32, @floatFromInt(LIGHT_TEST_ACCUMULATION_COUNT));
         } else {
-            irradiance_blend_v = 0;
+            solution.irradiance_blend_v = 0;
         }
     }
 
@@ -1311,7 +1470,7 @@ pub fn endLightingComputation(
 
     buildSpatialPartitionForLighting(solution);
     if (false) {
-        computLightPropagation(solution, lighting_queue, irradiance_blend_u);
+        computLightPropagation(solution, lighting_queue, solution.irradiance_blend_u);
     }
 
     if (true) {

@@ -621,6 +621,7 @@ pub fn updateAndRenderWorld(
     lighting.beginLightingComputation(
         &world_mode.test_lighting,
         &render_group,
+        world_mode.world,
         world_mode.camera.simulation_center,
         delta_from_sim,
         world_mode.updating_lighting,
