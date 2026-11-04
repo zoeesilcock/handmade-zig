@@ -503,6 +503,7 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const max = Shared.max;
         pub const packColorBGRA255 = Shared.packColorBGRA255;
         pub const packColorBGRA = Shared.packColorBGRA;
+        pub const packColorBGRA16 = Shared.packColorBGRA16;
         pub const unpackColorBGRA = Shared.unpackColorBGRA;
         pub const packColorRGBA = Shared.packColorRGBA;
         pub const unpackColorRGBA = Shared.unpackColorRGBA;
@@ -717,6 +718,7 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const packColorBGRA255 = Shared.packColorBGRA255;
         pub const packColorBGRA = Shared.packColorBGRA;
+        pub const packColorBGRA16 = Shared.packColorBGRA16;
         pub const unpackColorBGRA = Shared.unpackColorBGRA;
         pub const packColorRGBA = Shared.packColorRGBA;
         pub const unpackColorRGBA = Shared.unpackColorRGBA;
@@ -880,6 +882,13 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
                 (intrinsics.roundReal32ToUInt32(self.r()) << 16) |
                 (intrinsics.roundReal32ToUInt32(self.g()) << 8) |
                 (intrinsics.roundReal32ToUInt32(self.b()) << 0));
+        }
+
+        pub inline fn packColorBGRA16(self: Self) u64 {
+            return ((@as(u64, @intCast(intrinsics.roundReal32ToUInt32(self.a()))) << 48) |
+                (@as(u64, @intCast(intrinsics.roundReal32ToUInt32(self.r()))) << 32) |
+                (@as(u64, @intCast(intrinsics.roundReal32ToUInt32(self.g()))) << 16) |
+                (@as(u64, @intCast(intrinsics.roundReal32ToUInt32(self.b()))) << 0));
         }
 
         pub inline fn unpackColorBGRA(value: u32) Self {

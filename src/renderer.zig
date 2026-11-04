@@ -269,7 +269,7 @@ pub const RenderCommands = extern struct {
     light_probe_position: [*]Vector3, // [max_light_probe_count]
 
     light_voxel_dimension: u32,
-    light_voxel_color: [LIGHT_DIRECTION_COUNT][*]u32, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
+    light_voxel_color: [LIGHT_DIRECTION_COUNT][*]Color3, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
     light_voxel_normal: [LIGHT_DIRECTION_COUNT][*]Vector3, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
 
     max_light_occluder_count: u32,

@@ -231,6 +231,7 @@ const MAX_LIGHT_INTENSITY = lighting.MAX_LIGHT_INTENSITY;
 const LIGHT_LOOKUP_VOXEL_DIM = lighting.LIGHT_LOOKUP_VOXEL_DIM;
 const MAX_LIGHT_PROBE_COUNT = lighting.MAX_LIGHT_PROBE_COUNT;
 const MAX_LIGHT_OCCLUDER_COUNT = lighting.MAX_LIGHT_OCCLUDER_COUNT;
+const LIGHT_FLOOR_VALUE = lighting.LIGHT_FLOOR_VALUE;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -410,7 +411,7 @@ pub const OpenGL = extern struct {
     light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
 
     light_data_normal: [LIGHT_DIRECTION_COUNT][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]Vector3 = undefined,
-    light_data_color: [LIGHT_DIRECTION_COUNT][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]u32 = undefined,
+    light_data_color: [LIGHT_DIRECTION_COUNT][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]Color3 = undefined,
 
     light_data_handle_normal: [LIGHT_DIRECTION_COUNT]u32 = @splat(0),
     light_data_handle_color: [LIGHT_DIRECTION_COUNT]u32 = @splat(0),
@@ -650,7 +651,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         platform.optGLTexImage3D.?(
             GL_TEXTURE_3D,
             0,
-            GL_R11F_G11F_B10F,
+            GL_RGB32F,
             LIGHT_LOOKUP_VOXEL_DIM,
             LIGHT_LOOKUP_VOXEL_DIM,
             LIGHT_LOOKUP_VOXEL_DIM,
@@ -670,13 +671,13 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         platform.optGLTexImage3D.?(
             GL_TEXTURE_3D,
             0,
-            GL.GL_RGBA8,
+            GL_RGB32F,
             LIGHT_LOOKUP_VOXEL_DIM,
             LIGHT_LOOKUP_VOXEL_DIM,
             LIGHT_LOOKUP_VOXEL_DIM,
             0,
-            GL.GL_BGRA_EXT,
-            GL.GL_UNSIGNED_BYTE,
+            GL.GL_RGB,
+            GL.GL_FLOAT,
             null,
         );
         gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
@@ -740,6 +741,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\#define DepthPeel %d
         \\#define LIGHTING_DISABLED %d
         \\#define MAX_LIGHT_INTENSITY %f
+        \\#define LIGHT_FLOOR_VALUE %f
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
@@ -747,6 +749,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
             @as(i32, @intCast(@intFromBool(depth_peel))),
             @as(i32, @intCast(@intFromBool(lighting_disabled))),
             MAX_LIGHT_INTENSITY,
+            LIGHT_FLOOR_VALUE,
         },
     );
     const vertex_code =
@@ -867,7 +870,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\vec3 GetIrradiance(vec4 LightV, vec3 LightNormalEncoded, vec3 ReflectionNormal)
         \\{
         \\  vec3 Result = vec3(0, 0, 0);
-        \\  vec3 LightNormal = 2.0 * LightNormalEncoded - vec3(1.0, 1.0, 1.0);
+        // \\  vec3 LightNormal = 2.0 * LightNormalEncoded - vec3(1.0, 1.0, 1.0);
+        \\  vec3 LightNormal = LightNormalEncoded;
         \\
         \\  float SpecularMix = 0.5;
         \\  float SpecularCoefficient = SpecularMix;
@@ -878,7 +882,9 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  if (LightDirectionCoefficient > 0)
         \\  {
         \\    float ReflectionCoefficient = clamp(dot(LightNormal, ReflectionNormal), 0.0, 1.0);
-        \\    vec3 LightColor = LightV.rgb * (MAX_LIGHT_INTENSITY * clamp(2.0 * LightV.a - 1.004, 0.0, 1.0));
+        // \\    vec3 LightColor = (LightV.rgb * LightV.a * MAX_LIGHT_INTENSITY) -
+        // \\                      vec3(LIGHT_FLOOR_VALUE,LIGHT_FLOOR_VALUE,LIGHT_FLOOR_VALUE);
+        \\    vec3 LightColor = LightV.rgb;
         \\    Result = DiffuseCoefficient * LightDirectionCoefficient * LightColor +
         \\             SpecularCoefficient * ReflectionCoefficient * LightColor;
         \\  }
@@ -904,9 +910,9 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  vec4 LightC3 = texture(LightSamplerC3, VoxelUVW);
         \\
         \\  vec3 LightData = GetIrradiance(LightC0, LightN0, R);
-        \\  LightData += GetIrradiance(LightC1, LightN1, R);
-        \\  LightData += GetIrradiance(LightC2, LightN2, R);
-        \\  LightData += GetIrradiance(LightC3, LightN3, R);
+        // \\  LightData += GetIrradiance(LightC1, LightN1, R);
+        // \\  LightData += GetIrradiance(LightC2, LightN2, R);
+        // \\  LightData += GetIrradiance(LightC3, LightN3, R);
         \\
         \\  return(LightData.rgb);
         \\}
@@ -2026,8 +2032,8 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 LIGHT_LOOKUP_VOXEL_DIM,
                 LIGHT_LOOKUP_VOXEL_DIM,
                 LIGHT_LOOKUP_VOXEL_DIM,
-                GL.GL_BGRA_EXT,
-                GL.GL_UNSIGNED_BYTE,
+                GL.GL_RGB,
+                GL.GL_FLOAT,
                 &open_gl.light_data_color[voxel_index],
             );
         }
