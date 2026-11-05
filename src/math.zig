@@ -1608,6 +1608,10 @@ pub fn squareV4(vector: @Vector(4, f32)) @Vector(4, f32) {
     return vector * vector;
 }
 
+pub fn cube(T: type, a: T) T {
+    return a * a * a;
+}
+
 pub fn lerpf(min: f32, max: f32, time: f32) f32 {
     return (1.0 - time) * min + time * max;
 }
@@ -1715,6 +1719,10 @@ pub fn safeRatio0f64(numerator: f64, divisor: f64) f64 {
 
 pub fn safeRatio1f64(numerator: f64, divisor: f64) f64 {
     return safeRatioNf64(numerator, divisor, 1);
+}
+
+pub fn signedSquareRoot(a: f32) f32 {
+    return intrinsics.signOfF32(a) * @sqrt(@abs(a));
 }
 
 pub inline fn sRGB255ToLinear1(color: Color) Color {

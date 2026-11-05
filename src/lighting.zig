@@ -16,14 +16,14 @@ const std = @import("std");
 
 // TODO:
 //
-// 1) Develop an effective encoding for normals and colors that does not produce flickering artifacts in the
-// test sampler.
-//
-// 2) Flood fill the voxel so that portions that didn't get sampled get filled in from nearby samples (basically
+// 1) Flood fill the voxel so that portions that didn't get sampled get filled in from nearby samples (basically
 // a filter pass over the voxel).
 //
-// 3) Fix the voxel centering so that the lighting hot region is always nearby to the camera so we don't see unlit
+// 2) Fix the voxel centering so that the lighting hot region is always nearby to the camera so we don't see unlit
 // areas like we do now.
+//
+// 3) Develop an effective encoding for normals and colors that does not produce flickering artifacts in the
+// test sampler.
 
 var global_config = &@import("config.zig").global_config;
 
@@ -1324,10 +1324,11 @@ fn spamVoxelSlice(
         }
 
         var light_normal: Vector3 = light_position.minus(voxel_center_position);
-        const light_distance: f32 = light_normal.length();
+        const light_distance: f32 = light_normal.lengthSquared();
         light_normal = light_normal.normalizeOrZero();
 
-        const light_distance_falloff: f32 = math.clampf01(1.0 - light_falloff * light_distance);
+        const light_distance_falloff: f32 = 1.0 - light_falloff * light_distance;
+        // std.debug.assert(light_distance_falloff >= 0);
 
         // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
         // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
@@ -1339,7 +1340,12 @@ fn spamVoxelSlice(
         const light_alpha: f32 = light_distance_falloff;
 
         const light_normal0: Vector3 = light_normal;
-        const light_color0: Color3 = light_color.scaledTo(light_alpha);
+        var light_color0: Color3 = light_color.scaledTo(light_alpha);
+        if (false) {
+            _ = light_color0.setR(math.signedSquareRoot(light_color0.r()));
+            _ = light_color0.setG(math.signedSquareRoot(light_color0.g()));
+            _ = light_color0.setB(math.signedSquareRoot(light_color0.b()));
+        }
 
         const i: Vector3u = .new(@intCast(voxel_index.x()), @intCast(voxel_index.y()), @intCast(voxel_index.z()));
 
@@ -1362,16 +1368,16 @@ fn spamVoxel(
     is_test_cast: bool,
 ) void {
     const voxel_index: Vector3i = getVoxelIndex(solution, spam_position);
-    spamVoxelSlice(
-        solution,
-        voxel_index,
-        light_position,
-        light_color,
-        light_falloff,
-        is_test_cast,
-    );
+    // spamVoxelSlice(
+    //     solution,
+    //     voxel_index,
+    //     light_position,
+    //     light_color,
+    //     light_falloff,
+    //     is_test_cast,
+    // );
 
-    if (false) {
+    if (true) {
         var dx: i32 = -1;
         while (dx <= 1) : (dx += 1) {
             spamVoxelSlice(
@@ -1469,7 +1475,7 @@ fn testCastFromProbes(
 
         // const light_box: *LightingBox = getLightLeafForPosition(solution, cast_position, false);
         const light_position: Vector3 = light_box.position;
-        const light_color: Color3 = Color3.new(1, 1, 1).scaledTo(10);
+        const light_color: Color3 = Color3.new(1, 1, 1).scaledTo(5);
 
         var cast_direction: Vector3 = light_position.minus(cast_position);
         const t_max: f32 = cast_direction.length();
@@ -1512,9 +1518,23 @@ fn testCastFromProbes(
         }
 
         if (hit_light) {
-            spamVoxel(solution, cast_position, light_position, light_color, 0.05, is_test_cast);
+            spamVoxel(solution, cast_position, light_position, light_color, 0.025, is_test_cast);
         }
     }
+}
+
+fn hasLight(cell: *LightVoxelCell) bool {
+    return cell.light_color[0].r() != 0 or
+        cell.light_color[0].g() != 0 or
+        cell.light_color[0].b() != 0;
+}
+
+fn getLightAmount(cell: *LightVoxelCell) f32 {
+    return @max(
+        cell.light_color[0].r(),
+        cell.light_color[0].g(),
+        cell.light_color[0].b(),
+    );
 }
 
 pub fn endLightingComputation(
@@ -1735,7 +1755,11 @@ pub fn endLightingComputation(
                     }
 
                     const element_index: u32 = z * hot_dimension * hot_dimension + y * hot_dimension + x;
-                    commands.light_voxel_normal[0][element_index] = light_normal0;
+                    if (true) {
+                        commands.light_voxel_normal[0][element_index] = light_normal0;
+                    } else {
+                        commands.light_voxel_normal[0][element_index] = .new(0, -1, 0);
+                    }
                     if (true) {
                         commands.light_voxel_color[0][element_index] = light_color0;
                     } else {
@@ -1750,6 +1774,86 @@ pub fn endLightingComputation(
 
                     commands.light_voxel_normal[3][element_index] = light_normal3;
                     commands.light_voxel_color[3][element_index] = light_color3;
+                }
+            }
+        }
+    }
+
+    if (false) {
+        // TODO: Need to ensure that the hot corner is placed properly.
+        std.debug.assert(solution.hot_corner_i.x() >= 2);
+        std.debug.assert(solution.hot_corner_i.y() >= 2);
+        std.debug.assert(solution.hot_corner_i.z() >= 2);
+
+        std.debug.assert(solution.hot_corner_i.x() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
+        std.debug.assert(solution.hot_corner_i.y() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
+        std.debug.assert(solution.hot_corner_i.z() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
+
+        var z: u32 = 0;
+        while (z < hot_dimension) : (z += 1) {
+            var y: u32 = 0;
+            while (y < hot_dimension) : (y += 1) {
+                var x: u32 = 0;
+                while (x < hot_dimension) : (x += 1) {
+                    var hot_z: u32 = solution.hot_corner_i.z() + z;
+                    var hot_y: u32 = solution.hot_corner_i.y() + y;
+                    var hot_x: u32 = solution.hot_corner_i.x() + x;
+                    const this_cell: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
+
+                    const element_index: u32 = z * hot_dimension * hot_dimension + y * hot_dimension + x;
+                    const light_amount: f32 = getLightAmount(this_cell);
+                    if (light_amount < 0.1) {
+                        var light_weight: f32 = 0;
+                        var light_normal0: Vector3 = .zero();
+                        var light_color0: Color3 = .zero();
+
+                        var dz: i32 = -1;
+                        while (dz <= 1) : (dz += 1) {
+                            var dy: i32 = -1;
+                            while (dy <= 1) : (dy += 1) {
+                                var dx: i32 = -1;
+                                while (dx <= 1) : (dx += 1) {
+                                    hot_z = @intCast(@as(i32, @intCast(solution.hot_corner_i.z() + z)) + dz);
+                                    hot_y = @intCast(@as(i32, @intCast(solution.hot_corner_i.y() + y)) + dy);
+                                    hot_x = @intCast(@as(i32, @intCast(solution.hot_corner_i.x() + x)) + dx);
+                                    const cell0: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
+
+                                    hot_z = @intCast(@as(i32, @intCast(solution.hot_corner_i.z() + z)) + 2 * dz);
+                                    hot_y = @intCast(@as(i32, @intCast(solution.hot_corner_i.y() + y)) + 2 * dy);
+                                    hot_x = @intCast(@as(i32, @intCast(solution.hot_corner_i.x() + x)) + 2 * dx);
+                                    const cell1: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
+
+                                    const n_light_amount: f32 = getLightAmount(cell0) + getLightAmount(cell1);
+                                    light_weight += n_light_amount;
+                                    light_normal0 = light_normal0.plus(
+                                        cell0.light_normal[0].scaledTo(2).minus(cell1.light_normal[0]).scaledTo(n_light_amount),
+                                    );
+                                    light_color0 = light_color0.plus(
+                                        cell0.light_color[0].scaledTo(2).minus(cell1.light_color[0]).scaledTo(n_light_amount),
+                                    );
+                                }
+                            }
+                        }
+
+                        light_color0 = light_color0.scaledTo(math.safeRatio0(1, light_weight));
+                        light_normal0 = light_normal0.normalizeOrZero();
+
+                        const light_blend: f32 = 0.1 - light_amount;
+                        commands.light_voxel_normal[0][element_index] =
+                            commands.light_voxel_normal[0][element_index].plus(light_normal0.scaledTo(light_blend));
+                        commands.light_voxel_color[0][element_index] =
+                            commands.light_voxel_color[0][element_index].plus(light_color0.scaledTo(light_blend));
+
+                        if (false) {
+                            if (light_weight == 0) {
+                                commands.light_voxel_normal[0][element_index] = .new(0, 0, 1);
+                                commands.light_voxel_color[0][element_index] = .new(1, 0, 1);
+                            }
+                        }
+                    } else {
+                        // commands.light_voxel_normal[0][element_index] = .new(0, 0, 1);
+                        // commands.light_voxel_color[0][element_index] = .new(1, 1, 0);
+                    }
                 }
             }
         }

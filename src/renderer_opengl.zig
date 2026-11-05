@@ -877,17 +877,30 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  float SpecularCoefficient = SpecularMix;
         \\  float DiffuseCoefficient = 1.0 - SpecularMix;
         \\
-        // \\  float LightDirectionCoefficient = clamp((1.0 / 1.7) * (dot(LightNormal, WorldNormal) + 0.7), 0, 1);
-        \\  float LightDirectionCoefficient = clamp(dot(LightNormal, WorldNormal), 0, 1);
+        \\  float LightDirectionCoefficient = clamp((1.0 / 1.7) * (dot(LightNormal, WorldNormal) + 0.7), 0, 1);
+        // \\  float LightDirectionCoefficient = clamp(dot(LightNormal, WorldNormal), 0, 1);
+        // \\  LightDirectionCoefficient = 0.5;
         \\  if (LightDirectionCoefficient > 0)
         \\  {
         \\    float ReflectionCoefficient = clamp(dot(LightNormal, ReflectionNormal), 0.0, 1.0);
         // \\    vec3 LightColor = (LightV.rgb * LightV.a * MAX_LIGHT_INTENSITY) -
         // \\                      vec3(LIGHT_FLOOR_VALUE,LIGHT_FLOOR_VALUE,LIGHT_FLOOR_VALUE);
         \\    vec3 LightColor = LightV.rgb;
-        \\    Result = DiffuseCoefficient * LightDirectionCoefficient * LightColor +
-        \\             SpecularCoefficient * ReflectionCoefficient * LightColor;
+        // \\    vec3 LightColor = LightV.rgb * LightV.rgb;
+        // \\    LightColor.r *= sign(LightV.r);
+        // \\    LightColor.g *= sign(LightV.g);
+        // \\    LightColor.b *= sign(LightV.b);
+        \\
+        \\    LightColor.r - max(LightColor.r, 0);
+        \\    LightColor.g - max(LightColor.g, 0);
+        \\    LightColor.b - max(LightColor.b, 0);
+        \\    Result = LightDirectionCoefficient * (DiffuseCoefficient * LightDirectionCoefficient * LightColor +
+        \\             SpecularCoefficient * ReflectionCoefficient * LightColor);
         \\  }
+        \\
+        // \\  Result = (0.5 * LightNormal + vec3(0.5, 0.5, 0.5));
+        // \\  Result = LightDirectionCoefficient * (0.5 * LightNormal + vec3(0.5, 0.5, 0.5));
+        // \\  Result = LightDirectionCoefficient * vec3(1, 1, 1);
         \\
         \\  return(Result);
         \\}
