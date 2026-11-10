@@ -372,80 +372,82 @@ fn pushDebugLine(solution: *LightingSolution, from_position: Vector3, to_positio
 }
 
 fn pushDebugBox(solution: *LightingSolution, box_min: Vector3, box_max: Vector3, color: Color) void {
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_min.y(), box_min.z()),
-        .new(box_min.x(), box_max.y(), box_min.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_max.y(), box_min.z()),
-        .new(box_min.x(), box_max.y(), box_max.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_max.y(), box_max.z()),
-        .new(box_min.x(), box_min.y(), box_max.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_min.y(), box_max.z()),
-        .new(box_min.x(), box_min.y(), box_min.z()),
-        color,
-    );
+    if (true) {
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_min.y(), box_min.z()),
+            .new(box_min.x(), box_max.y(), box_min.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_max.y(), box_min.z()),
+            .new(box_min.x(), box_max.y(), box_max.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_max.y(), box_max.z()),
+            .new(box_min.x(), box_min.y(), box_max.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_min.y(), box_max.z()),
+            .new(box_min.x(), box_min.y(), box_min.z()),
+            color,
+        );
 
-    pushDebugLine(
-        solution,
-        .new(box_max.x(), box_min.y(), box_min.z()),
-        .new(box_max.x(), box_max.y(), box_min.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_max.x(), box_max.y(), box_min.z()),
-        .new(box_max.x(), box_max.y(), box_max.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_max.x(), box_max.y(), box_max.z()),
-        .new(box_max.x(), box_min.y(), box_max.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_max.x(), box_min.y(), box_max.z()),
-        .new(box_max.x(), box_min.y(), box_min.z()),
-        color,
-    );
+        pushDebugLine(
+            solution,
+            .new(box_max.x(), box_min.y(), box_min.z()),
+            .new(box_max.x(), box_max.y(), box_min.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_max.x(), box_max.y(), box_min.z()),
+            .new(box_max.x(), box_max.y(), box_max.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_max.x(), box_max.y(), box_max.z()),
+            .new(box_max.x(), box_min.y(), box_max.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_max.x(), box_min.y(), box_max.z()),
+            .new(box_max.x(), box_min.y(), box_min.z()),
+            color,
+        );
 
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_min.y(), box_min.z()),
-        .new(box_max.x(), box_min.y(), box_min.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_max.y(), box_min.z()),
-        .new(box_max.x(), box_max.y(), box_min.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_max.y(), box_max.z()),
-        .new(box_max.x(), box_max.y(), box_max.z()),
-        color,
-    );
-    pushDebugLine(
-        solution,
-        .new(box_min.x(), box_min.y(), box_max.z()),
-        .new(box_max.x(), box_min.y(), box_max.z()),
-        color,
-    );
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_min.y(), box_min.z()),
+            .new(box_max.x(), box_min.y(), box_min.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_max.y(), box_min.z()),
+            .new(box_max.x(), box_max.y(), box_min.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_max.y(), box_max.z()),
+            .new(box_max.x(), box_max.y(), box_max.z()),
+            color,
+        );
+        pushDebugLine(
+            solution,
+            .new(box_min.x(), box_min.y(), box_max.z()),
+            .new(box_max.x(), box_min.y(), box_max.z()),
+            color,
+        );
+    }
 }
 
 fn getLightLeafForPosition(solution: *LightingSolution, position: Vector3, is_test_case: bool) *LightingBox {

@@ -176,6 +176,10 @@ pub const RenderSettings = extern struct {
     nearest_texel_filtering: bool = false,
     no_mip_maps: bool = false,
 
+    // This is a monotonically increasing value that gets incremented whenever the renderer gets relaoded or another
+    // event occurs that might want the renderer to reinitialize without actually changing any of the settings above.
+    version: u32 = 0,
+
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));
         inline for (type_info.@"struct".field_names, 0..) |struct_field_name, i| {

@@ -2283,6 +2283,7 @@ pub export fn WinMain(
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
+                var renderer_was_reloaded: bool = false;
                 var expected_frames_per_update: u32 = 1;
                 var target_seconds_per_frame: f32 =
                     @as(f32, @floatFromInt(expected_frames_per_update)) / game_update_hz;
@@ -2580,11 +2581,16 @@ pub export fn WinMain(
 
                     // Output game to screen.
                     if (renderer_code.is_valid) {
+                        if (renderer_was_reloaded) {
+                            frame.?.settings.version += 1;
+                            renderer_was_reloaded = false;
+                        }
                         renderer_functions.win32EndFrame.?(platform_renderer, frame.?);
                     }
 
                     if (checkForCodeChange(&renderer_code)) {
                         reloadCode(state, &renderer_code);
+                        renderer_was_reloaded = true;
                     }
 
                     flip_wall_clock = getWallClock();
