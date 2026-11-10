@@ -1103,7 +1103,7 @@ pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.c) void 
     return;
 }
 
-pub fn debugFrameEndStub(_: *Memory, _: *GameInput, _: *RenderCommands) callconv(.c) void {
+pub fn debugFrameEndStub(_: *Memory, _: *GameInput, _: ?*RenderCommands) callconv(.c) void {
     return undefined;
 }
 

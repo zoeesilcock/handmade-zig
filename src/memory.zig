@@ -376,8 +376,9 @@ pub fn zeroStruct(comptime T: type, ptr: *T) void {
     zeroSize(@sizeOf(T), @ptrCast(ptr));
 }
 
-pub fn zeroArray(count: u32, ptr: *anyopaque) void {
-    zeroSize(@sizeOf(ptr) * count, ptr);
+pub fn zeroArray(count: u32, ptr: anytype) void {
+    const T = @typeInfo(@TypeOf(ptr)).pointer.child;
+    zeroSize(@sizeOf(T) * count, @ptrCast(ptr));
 }
 
 pub fn bootstrapPushStruct(

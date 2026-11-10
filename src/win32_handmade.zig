@@ -77,6 +77,7 @@ const TicketMutex = types.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const LightingBox = renderer.LightingBox;
+const RendererFunctionTable = win32_renderer.RendererFunctionTable;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -136,8 +137,6 @@ const Win32State = extern struct {
     exe_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
     one_past_last_exe_file_name_slash: usize = 0,
 
-    temp_dll_number: u32 = 0,
-
     default_window_handle: win32.HWND = undefined,
 };
 
@@ -162,13 +161,39 @@ const ThreadStartup = struct {
     queue: *shared.PlatformWorkQueue = undefined,
 };
 
-pub const Game = struct {
+fn loadedCodeEntryPoint(name: []const u8, module: win32.HINSTANCE, function_table: *anyopaque) bool {
+    _ = name;
+    _ = module;
+    _ = function_table;
+    //
+}
+
+const LoadedCode = struct {
     is_valid: bool = false,
+    temp_dll_number: u32 = 0,
+
+    transient_dll_name: []const u8,
+    dll_full_path: [*:0]const u8,
+    // lock_full_path: [*:0]const u8,
+
     dll: ?win32.HINSTANCE = undefined,
     last_write_time: win32.FILETIME = undefined,
+
+    function_count: u32,
+    function_names: [*]const [*:0]const u8,
+    functions: [*]*const anyopaque,
+};
+
+const GameFunctionTable = struct {
     updateAndRender: ?*const @TypeOf(shared.updateAndRenderStub) = null,
     getSoundSamples: ?*const @TypeOf(shared.getSoundSamplesStub) = null,
     debugFrameEnd: ?*const @TypeOf(shared.debugFrameEndStub) = null,
+};
+
+const game_function_table_names: [3][*:0]const u8 = .{
+    "updateAndRender",
+    "getSoundSamples",
+    "debugFrameEnd",
 };
 
 const Win32PlatformFileGroup = extern struct {
@@ -786,74 +811,78 @@ fn timeIsValid(time: win32.FILETIME) bool {
     return time.dwLowDateTime != 0 or time.dwHighDateTime != 0;
 }
 
-fn loadGameCode(state: *Win32State, source_dll_name: [*:0]const u8) Game {
-    var result = Game{};
+fn loadCode(state: *Win32State, loaded: *LoadedCode) void {
     var temp_dll_name: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
+    const source_dll_name = loaded.dll_full_path;
 
-    while (state.temp_dll_number < 1024) {
-        buildExePathFileNameWithNumber(state, state.temp_dll_number, "handmade_temp.dll", &temp_dll_name);
+    var attempt_index: u32 = 0;
+    while (attempt_index < 128) : (attempt_index += 1) {
+        buildExePathFileNameWithNumber(state, loaded.temp_dll_number, loaded.transient_dll_name, &temp_dll_name);
+
+        loaded.temp_dll_number += 1;
+        if (loaded.temp_dll_number >= 1024) {
+            loaded.temp_dll_number = 0;
+        }
+
         if (win32.CopyFileA(source_dll_name, @ptrCast(&temp_dll_name), win32.FALSE) != 0) {
             break;
-        } else {
-            state.temp_dll_number += 1;
         }
     }
 
-    result.last_write_time = getLastWriteTime(source_dll_name);
-    result.dll = win32.LoadLibraryA(@ptrCast(&temp_dll_name));
-    result.debugFrameEnd = null;
+    loaded.last_write_time = getLastWriteTime(source_dll_name);
+    loaded.dll = win32.LoadLibraryA(@ptrCast(&temp_dll_name));
 
-    if (result.dll) |library| {
-        if (win32.GetProcAddress(library, "updateAndRender")) |procedure| {
-            result.updateAndRender = @as(@TypeOf(result.updateAndRender), @ptrCast(procedure));
+    if (loaded.dll) |library| {
+        loaded.is_valid = true;
+        var function_index: u32 = 0;
+        while (function_index < loaded.function_count) : (function_index += 1) {
+            if (win32.GetProcAddress(library, loaded.function_names[function_index])) |procedure| {
+                loaded.functions[function_index] = @ptrCast(procedure);
+            } else {
+                loaded.is_valid = false;
+            }
         }
-
-        if (win32.GetProcAddress(library, "getSoundSamples")) |procedure| {
-            result.getSoundSamples = @as(@TypeOf(result.getSoundSamples), @ptrCast(procedure));
-        }
-
-        if (win32.GetProcAddress(library, "debugFrameEnd")) |procedure| {
-            result.debugFrameEnd = @as(@TypeOf(result.debugFrameEnd), @ptrCast(procedure));
-        }
-
-        result.is_valid =
-            result.updateAndRender != null and result.getSoundSamples != null and result.debugFrameEnd != null;
     } else {
         outputLastError("LoadLibraryA error");
         @panic("Failed to load game library.");
     }
 
-    if (!result.is_valid) {
-        result.updateAndRender = null;
-        result.getSoundSamples = null;
-        result.debugFrameEnd = null;
+    if (!loaded.is_valid) {
+        unloadCode(loaded);
     }
+}
 
+fn checkForCodeChange(loaded: *LoadedCode) bool {
+    const last_dll_write_time = getLastWriteTime(loaded.dll_full_path);
+    const result: bool = win32.CompareFileTime(&last_dll_write_time, &loaded.last_write_time) != 0;
     return result;
 }
 
-fn unloadGameCode(game: *Game) void {
-    if (game.dll) |dll| {
+fn reloadCode(state: *Win32State, loaded: *LoadedCode) void {
+    unloadCode(loaded);
+    loadCode(state, loaded);
+}
+
+fn unloadCode(loaded: *LoadedCode) void {
+    if (loaded.dll) |dll| {
         _ = dll;
         // TODO: Currently, we never unload libraries, because we may still be pointing to strings that are inside
         // them (despite our best efforts). Should we just make "never unload" be the policy?
         // _ = win32.FreeLibrary(dll);
-        game.dll = undefined;
+        loaded.dll = null;
     }
-
-    game.updateAndRender = null;
-    game.getSoundSamples = null;
-    game.debugFrameEnd = null;
+    loaded.is_valid = false;
+    memory.zeroArray(loaded.function_count, loaded.functions);
 }
 
-fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(.winapi) isize {
+fn xInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(.winapi) isize {
     return @backingInt(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize {
+fn xInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize {
     return @backingInt(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(.winapi) isize = XInputGetStateStub;
-var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize = XInputSetStateStub;
+var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(.winapi) isize = xInputGetStateStub;
+var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize = xInputSetStateStub;
 
 fn loadXInput() void {
     const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll") orelse
@@ -2030,6 +2059,9 @@ pub export fn WinMain(
     var source_dll_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     buildExePathFileName(state, "handmade.dll", &source_dll_path);
 
+    var renderer_dll_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
+    buildExePathFileName(state, "win32-handmade-opengl.dll", &renderer_dll_path);
+
     var performance_frequency: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceFrequency(&performance_frequency);
     perf_count_frequency = performance_frequency.QuadPart;
@@ -2121,8 +2153,20 @@ pub export fn WinMain(
                 .max_special_texture_count = shared.SPECIAL_TEXTURE_COUNT,
                 .texture_transfer_buffer_size = shared.TEXTURE_TRANSFER_BUFFER_SIZE,
             };
-            const platform_renderer: *PlatformRenderer =
-                win32_renderer.initDefaultRenderer(window_handle, &limits);
+            var renderer_functions: RendererFunctionTable = .{};
+            var renderer_code: LoadedCode = .{
+                .transient_dll_name = "handmade_renderer_temp.dll",
+                .dll_full_path = &renderer_dll_path,
+                .function_count = win32_renderer.renderer_function_table_names.len,
+                .function_names = @ptrCast(&win32_renderer.renderer_function_table_names),
+                .functions = @ptrCast(&renderer_functions),
+            };
+            loadCode(state, &renderer_code);
+
+            if (!renderer_code.is_valid) {
+                errorMessage(.Fatal, "Unable to load renderer.");
+            }
+            const platform_renderer: *PlatformRenderer = renderer_functions.win32LoadRenderer.?(renderer_dc, &limits).?;
 
             var high_priority_startups: [6]ThreadStartup = @splat(.{});
             var high_priority_queue = shared.PlatformWorkQueue{};
@@ -2224,8 +2268,16 @@ pub export fn WinMain(
                 var flip_wall_clock: win32.LARGE_INTEGER = getWallClock();
 
                 // Load the game code.
-                var game = loadGameCode(state, &source_dll_path);
-                global_debug_table.setEventRecording(game.is_valid);
+                var game: GameFunctionTable = .{};
+                var game_code: LoadedCode = .{
+                    .transient_dll_name = "handmade_game_temp.dll",
+                    .dll_full_path = &source_dll_path,
+                    .function_count = game_function_table_names.len,
+                    .function_names = @ptrCast(&game_function_table_names),
+                    .functions = @ptrCast(&game),
+                };
+                loadCode(state, &game_code);
+                global_debug_table.setEventRecording(game_code.is_valid);
 
                 running = true;
 
@@ -2268,13 +2320,17 @@ pub export fn WinMain(
                         window_dimension.width(),
                         window_dimension.height(),
                     );
-                    var frame: *RenderCommands = platform_renderer.beginFrame(
-                        platform_renderer,
-                        window_dimension,
-                        render_dimensions,
-                        draw_region,
-                    ).?;
-                    frame.settings.render_dim = render_dimensions;
+                    var frame: ?*RenderCommands = null;
+
+                    if (renderer_code.is_valid) {
+                        frame = renderer_functions.win32BeginFrame.?(
+                            platform_renderer,
+                            window_dimension,
+                            render_dimensions,
+                            draw_region,
+                        ).?;
+                        frame.?.settings.render_dim = render_dimensions;
+                    }
 
                     TimedBlock.beginBlock(@src(), .ControllerClearing);
                     const old_keyboard_controller = &old_input.controllers[0];
@@ -2311,7 +2367,7 @@ pub export fn WinMain(
 
                     TimedBlock.beginBlock(@src(), .GameUpdate);
 
-                    if (!paused) {
+                    if (frame != null and !paused) {
                         if (state.input_recording_index > 0) {
                             recordInput(state, new_input);
                         } else if (state.input_playing_index > 0) {
@@ -2327,7 +2383,7 @@ pub export fn WinMain(
                         }
 
                         // Send all input to game.
-                        game.updateAndRender.?(platform, &game_memory, new_input, frame);
+                        game.updateAndRender.?(platform, &game_memory, new_input, frame.?);
 
                         if (new_input.quit_requested) {
                             running = false;
@@ -2451,9 +2507,7 @@ pub export fn WinMain(
                         TimedBlock.beginBlock(@src(), .DebugCollation);
                         defer TimedBlock.endBlock(@src(), .DebugCollation);
 
-                        const last_dll_write_time = getLastWriteTime(&source_dll_path);
-                        const executable_needs_reloading: bool =
-                            win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0;
+                        const executable_needs_reloading: bool = checkForCodeChange(&game_code);
 
                         if (false) {
                             const new_exe_time = getLastWriteTime(&exe_full_path);
@@ -2479,10 +2533,10 @@ pub export fn WinMain(
                         }
 
                         if (executable_needs_reloading) {
-                            unloadGameCode(&game);
-                            game = loadGameCode(state, &source_dll_path);
+                            reloadCode(state, &game_code);
+
+                            global_debug_table.setEventRecording(game_code.is_valid);
                             game_memory.executable_reloaded = true;
-                            global_debug_table.setEventRecording(game.is_valid);
                         }
                     }
 
@@ -2525,7 +2579,13 @@ pub export fn WinMain(
                     TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     // Output game to screen.
-                    platform_renderer.endFrame(platform_renderer, frame);
+                    if (renderer_code.is_valid) {
+                        renderer_functions.win32EndFrame.?(platform_renderer, frame.?);
+                    }
+
+                    if (checkForCodeChange(&renderer_code)) {
+                        reloadCode(state, &renderer_code);
+                    }
 
                     flip_wall_clock = getWallClock();
 

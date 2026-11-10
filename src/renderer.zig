@@ -134,14 +134,6 @@ pub const TextureQueue = extern struct {
     ops: [256]TextureOp,
 };
 
-const beginFrameType = fn (
-    platform_renderer: *PlatformRenderer,
-    window_dim: Vector2u,
-    render_dim: Vector2u,
-    draw_region: Rectangle2i,
-) callconv(.c) ?*RenderCommands;
-const endFrameType = fn (platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void;
-
 pub const PlatformRendererLimits = extern struct {
     max_quad_count_per_frame: u32,
     max_texture_count: u32,
@@ -151,9 +143,8 @@ pub const PlatformRendererLimits = extern struct {
 
 pub const PlatformRenderer = extern struct {
     texture_queue: TextureQueue = undefined,
-    beginFrame: *const beginFrameType = undefined,
-    endFrame: *const endFrameType = undefined,
 
+    // TODO: Re-enable this.
     total_texture_memory: usize = 0,
     total_framebuffer_memory: usize = 0,
     used_multisample_count: u32 = 0,

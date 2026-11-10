@@ -205,6 +205,56 @@ const ALL_COLOR_ATTACHMENTS = [_]u32{
     GL_COLOR_ATTACHMENT31,
 };
 
+const GLBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(.winapi) void;
+const GLGenFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
+const GLDeleteFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
+const GLFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32) callconv(.winapi) void;
+const GLCheckFramebufferStatusEXT: type = fn (target: u32) callconv(.winapi) u32;
+const GLTexImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(.winapi) u32;
+const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y1: i32, dst_x0: i32, dst_y0: i32, dst_x1: i32, dst_y1: i32, mask: u32, filter: u32) callconv(.winapi) void;
+const GLCreateShader: type = fn (shader_type: u32) callconv(.winapi) u32;
+const GLDeleteShader: type = fn (shader: u32) callconv(.winapi) void;
+const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const [*:0]const u8, length: ?*i32) callconv(.winapi) void;
+const GLCompileShader: type = fn (shader: u32) callconv(.winapi) void;
+const GLCreateProgram: type = fn () callconv(.winapi) u32;
+const GLDeleteProgram: type = fn (program: u32) callconv(.winapi) void;
+const GLLinkProgram: type = fn (shader: u32) callconv(.winapi) void;
+const GLAttachShader: type = fn (program: u32, shader: u32) callconv(.winapi) void;
+const GLValidateProgram: type = fn (program: u32) callconv(.winapi) void;
+const GLGetProgramiv: type = fn (program: u32, pname: u32, params: *i32) callconv(.winapi) void;
+const GLGetShaderInfoLog: type = fn (shader: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(.winapi) void;
+const GLGetProgramInfoLog: type = fn (program: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(.winapi) void;
+const GLUseProgram: type = fn (program: u32) callconv(.winapi) void;
+const GLUniformMatrix4fv: type = fn (location: i32, count: i32, transpose: bool, value: *const f32) callconv(.winapi) void;
+const GLUniform1f: type = fn (location: i32, value: f32) callconv(.winapi) void;
+const GLUniform2fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
+const GLUniform3fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
+const GLUniform4fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
+const GLUniform1i: type = fn (location: i32, value: i32) callconv(.winapi) void;
+const GLGetUniformLocation: type = fn (program: u32, [*]const u8) callconv(.winapi) i32;
+const GLGetAttribLocation: type = fn (program: u32, name: [*]const u8) callconv(.winapi) i32;
+const GLEnableVertexAttribArray: type = fn (index: u32) callconv(.winapi) void;
+const GLDisableVertexAttribArray: type = fn (index: u32) callconv(.winapi) void;
+const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: ?*anyopaque) callconv(.winapi) void;
+const GLVertexAttribIPointer: type = fn (index: u32, size: i32, data_type: u32, stride: isize, pointer: ?*anyopaque) callconv(.winapi) void;
+const GLGenVertexArrays: type = fn (size: i32, arrays: ?*u32) callconv(.winapi) void;
+const GLBindVertexArray: type = fn (array: u32) callconv(.winapi) void;
+const GLDrawArrays: type = fn (mode: u32, first: i32, count: i32) callconv(.winapi) void;
+const GLDrawElements: type = fn (mode: u32, count: i32, index_type: u32, indices: ?*anyopaque) callconv(.winapi) void;
+const GLDrawElementsBaseVertex: type = fn (mode: u32, count: i32, index_type: u32, indices: ?*anyopaque, basevertex: i32) callconv(.winapi) void;
+const GLDebugProcArb = ?*const fn (source: u32, message_type: u32, id: u32, severity: u32, length: i32, message: [*]const u8, user_param: ?*const anyopaque) callconv(.winapi) void;
+const GLDebugMessageCallbackARB: type = fn (callback: GLDebugProcArb, user_param: ?*const anyopaque) callconv(.winapi) void;
+const GLDebugMessageControlARB: type = fn (source: u32, message_type: u32, severity: u32, count: i32, ids: [*]const i32, enabled: bool) callconv(.winapi) void;
+const GLGetStringi: type = fn (name: u32, index: u32) callconv(.winapi) ?*u8;
+const GLGenBuffers: type = fn (count: i32, buffers: *u32) callconv(.winapi) void;
+const GLBindBuffer: type = fn (target: u32, buffer: u32) callconv(.winapi) void;
+const GLBufferData: type = fn (target: u32, size: isize, data: *anyopaque, usage: u32) callconv(.winapi) void;
+const GLActiveTexture: type = fn (texture: u32) callconv(.winapi) void;
+const GLDrawBuffers: type = fn (n: u32, buffers: [*]const u32) callconv(.winapi) void;
+const GLBindFragDataLocation: type = fn (program: u32, color: u32, name: [*]const u8) callconv(.winapi) void;
+const GLTexImage3D: type = fn (target: u32, level: i32, internalformat: i32, width: isize, height: isize, depth: isize, border: i32, format: u32, type: u32, pixels: ?*const anyopaque) callconv(.winapi) void;
+const GLTexSubImage3D: type = fn (target: u32, level: i32, xoffset: i32, yoffset: i32, zoffset: i32, width: isize, height: isize, depth: isize, format: u32, type: u32, pixels: ?*const anyopaque) callconv(.winapi) void;
+
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
@@ -420,6 +470,55 @@ pub const OpenGL = extern struct {
     // light_buffers: [12]LightBuffer = undefined,
 
     render_commands: RenderCommands,
+
+    optGLBindFramebufferEXT: ?*const GLBindFramebufferEXT = null,
+    optGLGenFramebuffersEXT: ?*const GLGenFramebuffersEXT = null,
+    optGLDeleteFramebuffersEXT: ?*const GLDeleteFramebuffersEXT = null,
+    optGLFrameBufferTexture2DEXT: ?*const GLFrameBufferTexture2DEXT = null,
+    optGLCheckFramebufferStatusEXT: ?*const GLCheckFramebufferStatusEXT = null,
+    optGLTexImage2DMultiSample: ?*const GLTexImage2DMultiSample = null,
+    optGLBlitFrameBuffer: ?*const GLBlitFrameBuffer = null,
+    optGLCreateShader: ?*const GLCreateShader = null,
+    optGLDeleteShader: ?*const GLDeleteShader = null,
+    optGLShaderSource: ?*const GLShaderSource = null,
+    optGLCompileShader: ?*const GLCompileShader = null,
+    optGLCreateProgram: ?*const GLCreateProgram = null,
+    optGLDeleteProgram: ?*const GLDeleteProgram = null,
+    optGLLinkProgram: ?*const GLLinkProgram = null,
+    optGLAttachShader: ?*const GLAttachShader = null,
+    optGLValidateProgram: ?*const GLValidateProgram = null,
+    optGLGetProgramiv: ?*const GLGetProgramiv = null,
+    optGLGetShaderInfoLog: ?*const GLGetShaderInfoLog = null,
+    optGLGetProgramInfoLog: ?*const GLGetProgramInfoLog = null,
+    optGLUseProgram: ?*const GLUseProgram = null,
+    optGLUniformMatrix4fv: ?*const GLUniformMatrix4fv = null,
+    optGLUniform1f: ?*const GLUniform1f = null,
+    optGLUniform2fv: ?*const GLUniform2fv = null,
+    optGLUniform3fv: ?*const GLUniform3fv = null,
+    optGLUniform4fv: ?*const GLUniform4fv = null,
+    optGLUniform1i: ?*const GLUniform1i = null,
+    optGLGetUniformLocation: ?*const GLGetUniformLocation = null,
+    optGLGetAttribLocation: ?*const GLGetAttribLocation = null,
+    optGLEnableVertexAttribArray: ?*const GLEnableVertexAttribArray = null,
+    optGLDisableVertexAttribArray: ?*const GLDisableVertexAttribArray = null,
+    optGLVertexAttribPointer: ?*const GLVertexAttribPointer = null,
+    optGLVertexAttribIPointer: ?*const GLVertexAttribIPointer = null,
+    optGLGenVertexArrays: ?*const GLGenVertexArrays = null,
+    optGLBindVertexArray: ?*const GLBindVertexArray = null,
+    optGLDrawArrays: ?*const GLDrawArrays = null,
+    optGLDrawElements: ?*const GLDrawElements = null,
+    optGLDrawElementsBaseVertex: ?*const GLDrawElementsBaseVertex = null,
+    optGLDebugMessageCallbackARB: ?*const GLDebugMessageCallbackARB = null,
+    optGLDebugMessageControlARB: ?*const GLDebugMessageControlARB = null,
+    optGLGetStringi: ?*const GLGetStringi = null,
+    optGLGenBuffers: ?*const GLGenBuffers = null,
+    optGLBindBuffer: ?*const GLBindBuffer = null,
+    optGLBufferData: ?*const GLBufferData = null,
+    optGLActiveTexture: ?*const GLActiveTexture = null,
+    optGLDrawBuffers: ?*const GLDrawBuffers = null,
+    optGLBindFragDataLocation: ?*const GLBindFragDataLocation = null,
+    optGLTexImage3D: ?*const GLTexImage3D = null,
+    optGLTexSubImage3D: ?*const GLTexSubImage3D = null,
 };
 
 pub const Info = struct {
@@ -433,7 +532,7 @@ pub const Info = struct {
     gl_ext_framebuffer_srgb: bool = false,
     gl_arb_framebuffer_object: bool = false,
 
-    pub fn get(is_modern_context: bool) Info {
+    pub fn get(open_gl: *OpenGL, is_modern_context: bool) Info {
         var result: Info = .{
             .is_modern_context = is_modern_context,
             .vendor = gl.glGetString(GL.GL_VENDOR),
@@ -452,7 +551,7 @@ pub const Info = struct {
 
         var extension_index: u32 = 0;
         while (extension_index < extension_count) : (extension_index += 1) {
-            if (platform.optGLGetStringi.?(GL.GL_EXTENSIONS, extension_index)) |extension_name| {
+            if (open_gl.optGLGetStringi.?(GL.GL_EXTENSIONS, extension_index)) |extension_name| {
                 if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_EXT_texture_sRGB")) {
                     result.gl_ext_texture_srgb = true;
                 } else if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_EXT_framebuffer_sRGB")) {
@@ -541,7 +640,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         }
 
         if (framebuffer_supports_sRGB and info.gl_ext_framebuffer_srgb) {
-            // if (platform.optGLTexImage2DMultiSample) |glTexImage2DMultisample| {
+            // if (open_gl.optGLTexImage2DMultiSample) |glTexImage2DMultisample| {
             // var test_texture: u32 = undefined;
             // gl.glGenTextures(1, &test_texture);
             // gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, test_texture);
@@ -570,29 +669,29 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     }
 
     if (INTERNAL) {
-        if (platform.optGLDebugMessageCallbackARB) |glDebugMessageCallbackARB| {
+        if (open_gl.optGLDebugMessageCallbackARB) |glDebugMessageCallbackARB| {
             gl.glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
             glDebugMessageCallbackARB(&glDebugProc, null);
         }
     }
 
     var dummy_vertex_array: u32 = 0;
-    platform.optGLGenVertexArrays.?(1, &dummy_vertex_array);
-    platform.optGLBindVertexArray.?(dummy_vertex_array);
+    open_gl.optGLGenVertexArrays.?(1, &dummy_vertex_array);
+    open_gl.optGLBindVertexArray.?(dummy_vertex_array);
 
-    platform.optGLGenBuffers.?(1, &open_gl.vertex_buffer);
-    platform.optGLGenBuffers.?(1, &open_gl.index_buffer);
+    open_gl.optGLGenBuffers.?(1, &open_gl.vertex_buffer);
+    open_gl.optGLGenBuffers.?(1, &open_gl.index_buffer);
 
     {
-        platform.optGLGenBuffers.?(1, &open_gl.screen_fill_vertex_buffer);
-        platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
+        open_gl.optGLGenBuffers.?(1, &open_gl.screen_fill_vertex_buffer);
+        open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
         var vertices: [4]TexturedVertex = [_]TexturedVertex{
             .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .color = 0xffffffff },
             .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .color = 0xffffffff },
             .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .color = 0xffffffff },
             .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .color = 0xffffffff },
         };
-        platform.optGLBufferData.?(
+        open_gl.optGLBufferData.?(
             GL_ARRAY_BUFFER,
             vertices.len * @sizeOf(TexturedVertex),
             &vertices,
@@ -610,7 +709,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
 
     var mip: MipIterator = .iterateMips(TEXTURE_ARRAY_DIM, TEXTURE_ARRAY_DIM, null);
     while (mip.isValid()) : (mip.advance()) {
-        platform.optGLTexImage3D.?(
+        open_gl.optGLTexImage3D.?(
             GL_TEXTURE_2D_ARRAY,
             @intCast(mip.level),
             open_gl.default_sprite_texture_format,
@@ -648,7 +747,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
         var handle: u32 = open_gl.light_data_handle_normal[voxel_index];
         gl.glBindTexture(GL_TEXTURE_3D, handle);
-        platform.optGLTexImage3D.?(
+        open_gl.optGLTexImage3D.?(
             GL_TEXTURE_3D,
             0,
             GL_RGB32F,
@@ -668,7 +767,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
 
         handle = open_gl.light_data_handle_color[voxel_index];
         gl.glBindTexture(GL_TEXTURE_3D, handle);
-        platform.optGLTexImage3D.?(
+        open_gl.optGLTexImage3D.?(
             GL_TEXTURE_3D,
             0,
             GL_RGB32F,
@@ -979,6 +1078,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
     ;
 
     const program_handle = createProgram(
+        open_gl,
         @ptrCast(defines[0..defines_length]),
         shader_header_code,
         vertex_code,
@@ -986,6 +1086,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         &program.common,
     );
     linkSamplers(
+        open_gl,
         &program.common,
         &.{
             "TextureSampler",
@@ -1001,18 +1102,18 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         },
     );
 
-    program.transform_id = platform.optGLGetUniformLocation.?(program_handle, "Transform");
+    program.transform_id = open_gl.optGLGetUniformLocation.?(program_handle, "Transform");
 
-    program.camera_position_id = platform.optGLGetUniformLocation.?(program_handle, "CameraPosition");
-    program.fog_direction_id = platform.optGLGetUniformLocation.?(program_handle, "FogDirection");
-    program.fog_color_id = platform.optGLGetUniformLocation.?(program_handle, "FogColor");
-    program.fog_start_distance_id = platform.optGLGetUniformLocation.?(program_handle, "FogStartDistance");
-    program.fog_end_distance_id = platform.optGLGetUniformLocation.?(program_handle, "FogEndDistance");
-    program.clip_alpha_start_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaStartDistance");
-    program.clip_alpha_end_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaEndDistance");
-    program.alpha_threshold_id = platform.optGLGetUniformLocation.?(program_handle, "AlphaThreshold");
-    program.voxel_min_corner_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelMinCorner");
-    program.voxel_inverse_total_dimension_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelInverseTotalDimension");
+    program.camera_position_id = open_gl.optGLGetUniformLocation.?(program_handle, "CameraPosition");
+    program.fog_direction_id = open_gl.optGLGetUniformLocation.?(program_handle, "FogDirection");
+    program.fog_color_id = open_gl.optGLGetUniformLocation.?(program_handle, "FogColor");
+    program.fog_start_distance_id = open_gl.optGLGetUniformLocation.?(program_handle, "FogStartDistance");
+    program.fog_end_distance_id = open_gl.optGLGetUniformLocation.?(program_handle, "FogEndDistance");
+    program.clip_alpha_start_distance_id = open_gl.optGLGetUniformLocation.?(program_handle, "ClipAlphaStartDistance");
+    program.clip_alpha_end_distance_id = open_gl.optGLGetUniformLocation.?(program_handle, "ClipAlphaEndDistance");
+    program.alpha_threshold_id = open_gl.optGLGetUniformLocation.?(program_handle, "AlphaThreshold");
+    program.voxel_min_corner_id = open_gl.optGLGetUniformLocation.?(program_handle, "VoxelMinCorner");
+    program.voxel_inverse_total_dimension_id = open_gl.optGLGetUniformLocation.?(program_handle, "VoxelInverseTotalDimension");
 }
 
 fn compilePeelCompositeProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
@@ -1096,18 +1197,23 @@ fn compilePeelCompositeProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) 
     ;
 
     _ = createProgram(
+        open_gl,
         @ptrCast(defines[0..defines_length]),
         shader_header_code,
         vertex_code,
         fragment_code,
         program,
     );
-    linkSamplers(program, &.{
-        "Peel0Sampler",
-        "Peel1Sampler",
-        "Peel2Sampler",
-        "Peel3Sampler",
-    });
+    linkSamplers(
+        open_gl,
+        program,
+        &.{
+            "Peel0Sampler",
+            "Peel1Sampler",
+            "Peel2Sampler",
+            "Peel3Sampler",
+        },
+    );
 }
 
 fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisampleProgram) void {
@@ -1252,13 +1358,14 @@ fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisamp
     );
 
     _ = createProgram(
+        open_gl,
         @ptrCast(defines[0..defines_length]),
         shader_header_code,
         vertex_code,
         @ptrCast(fragment_code[0..fragment_code_length]),
         &program.common,
     );
-    linkSamplers(&program.common, &.{ "DepthSampler", "ColorSampler", "MaskSampler" });
+    linkSamplers(open_gl, &program.common, &.{ "DepthSampler", "ColorSampler", "MaskSampler" });
 }
 
 fn compileFinalStretchProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
@@ -1303,48 +1410,57 @@ fn compileFinalStretchProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) v
     ;
 
     _ = createProgram(
+        open_gl,
         @ptrCast(defines[0..defines_length]),
         shader_header_code,
         vertex_code,
         fragment_code,
         program,
     );
-    linkSamplers(program, &.{"ImageSampler"});
+    linkSamplers(open_gl, program, &.{"ImageSampler"});
 }
 
-fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *align(1) RenderSetup, alpha_threshold: f32) void {
-    useProgramBegin(&program.common);
+fn useZBiasProgramBegin(
+    open_gl: *OpenGL,
+    program: *ZBiasProgram,
+    setup: *align(1) RenderSetup,
+    alpha_threshold: f32,
+) void {
+    useProgramBegin(open_gl, &program.common);
 
-    platform.optGLUniformMatrix4fv.?(program.transform_id, 1, true, setup.projection.toGL());
-    platform.optGLUniform3fv.?(program.camera_position_id, 1, setup.camera_position.toGL());
-    platform.optGLUniform3fv.?(program.fog_direction_id, 1, setup.fog_direction.toGL());
-    platform.optGLUniform3fv.?(program.fog_color_id, 1, setup.fog_color.toGL());
-    platform.optGLUniform1f.?(program.fog_start_distance_id, setup.fog_start_distance);
-    platform.optGLUniform1f.?(program.fog_end_distance_id, setup.fog_end_distance);
-    platform.optGLUniform1f.?(program.clip_alpha_start_distance_id, setup.clip_alpha_start_distance);
-    platform.optGLUniform1f.?(program.clip_alpha_end_distance_id, setup.clip_alpha_end_distance);
-    platform.optGLUniform1f.?(program.alpha_threshold_id, alpha_threshold);
-    platform.optGLUniform3fv.?(program.voxel_min_corner_id, 1, setup.voxel_min_corner.toGL());
-    platform.optGLUniform3fv.?(program.voxel_inverse_total_dimension_id, 1, setup.voxel_inverse_total_dimension.toGL());
+    open_gl.optGLUniformMatrix4fv.?(program.transform_id, 1, true, setup.projection.toGL());
+    open_gl.optGLUniform3fv.?(program.camera_position_id, 1, setup.camera_position.toGL());
+    open_gl.optGLUniform3fv.?(program.fog_direction_id, 1, setup.fog_direction.toGL());
+    open_gl.optGLUniform3fv.?(program.fog_color_id, 1, setup.fog_color.toGL());
+    open_gl.optGLUniform1f.?(program.fog_start_distance_id, setup.fog_start_distance);
+    open_gl.optGLUniform1f.?(program.fog_end_distance_id, setup.fog_end_distance);
+    open_gl.optGLUniform1f.?(program.clip_alpha_start_distance_id, setup.clip_alpha_start_distance);
+    open_gl.optGLUniform1f.?(program.clip_alpha_end_distance_id, setup.clip_alpha_end_distance);
+    open_gl.optGLUniform1f.?(program.alpha_threshold_id, alpha_threshold);
+    open_gl.optGLUniform3fv.?(program.voxel_min_corner_id, 1, setup.voxel_min_corner.toGL());
+    open_gl.optGLUniform3fv.?(program.voxel_inverse_total_dimension_id, 1, setup.voxel_inverse_total_dimension.toGL());
 }
 
 fn useResolveMultisampleProgramBegin(open_gl: *OpenGL, program: *ResolveMultisampleProgram) void {
-    _ = open_gl;
-    useProgramBegin(&program.common);
+    useProgramBegin(open_gl, &program.common);
 }
 
-fn useMultiGridLightDownProgramBegin(program: *MultiGridLightDownProgram, source_uv_step: Vector2) void {
-    useProgramBegin(&program.common);
+fn useMultiGridLightDownProgramBegin(
+    open_gl: *OpenGL,
+    program: *MultiGridLightDownProgram,
+    source_uv_step: Vector2,
+) void {
+    useProgramBegin(open_gl, &program.common);
 
-    platform.optGLUniform2fv.?(program.source_uv_step, 1, source_uv_step.toGL());
+    open_gl.optGLUniform2fv.?(program.source_uv_step, 1, source_uv_step.toGL());
 }
 
 fn isValidArray(index: i32) bool {
     return index != -1;
 }
 
-fn useProgramBegin(program: *OpenGLProgramCommon) void {
-    platform.optGLUseProgram.?(program.program_handle);
+fn useProgramBegin(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
+    open_gl.optGLUseProgram.?(program.program_handle);
 
     const position_array_index: i32 = program.vert_position_id;
     const normal_array_index: i32 = program.vert_normal_id;
@@ -1353,8 +1469,8 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
     const texture_index_index: i32 = program.vert_texture_index_id;
 
     if (isValidArray(position_array_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(position_array_index));
-        platform.optGLVertexAttribPointer.?(
+        open_gl.optGLEnableVertexAttribArray.?(@intCast(position_array_index));
+        open_gl.optGLVertexAttribPointer.?(
             @intCast(position_array_index),
             4,
             GL.GL_FLOAT,
@@ -1364,8 +1480,8 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         );
     }
     if (isValidArray(normal_array_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(normal_array_index));
-        platform.optGLVertexAttribPointer.?(
+        open_gl.optGLEnableVertexAttribArray.?(@intCast(normal_array_index));
+        open_gl.optGLVertexAttribPointer.?(
             @intCast(normal_array_index),
             3,
             GL.GL_FLOAT,
@@ -1375,8 +1491,8 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         );
     }
     if (isValidArray(color_array_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(color_array_index));
-        platform.optGLVertexAttribPointer.?(
+        open_gl.optGLEnableVertexAttribArray.?(@intCast(color_array_index));
+        open_gl.optGLVertexAttribPointer.?(
             @intCast(color_array_index),
             4,
             GL.GL_UNSIGNED_BYTE,
@@ -1386,8 +1502,8 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         );
     }
     if (isValidArray(uv_array_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(uv_array_index));
-        platform.optGLVertexAttribPointer.?(
+        open_gl.optGLEnableVertexAttribArray.?(@intCast(uv_array_index));
+        open_gl.optGLVertexAttribPointer.?(
             @intCast(uv_array_index),
             2,
             GL.GL_FLOAT,
@@ -1397,8 +1513,8 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
         );
     }
     if (isValidArray(texture_index_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(texture_index_index));
-        platform.optGLVertexAttribIPointer.?(
+        open_gl.optGLEnableVertexAttribArray.?(@intCast(texture_index_index));
+        open_gl.optGLVertexAttribIPointer.?(
             @intCast(texture_index_index),
             1,
             GL.GL_UNSIGNED_SHORT,
@@ -1409,12 +1525,12 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
 
     var sampler_index: u32 = 0;
     while (sampler_index < program.sampler_count) : (sampler_index += 1) {
-        platform.optGLUniform1i.?(program.samplers[sampler_index], @intCast(sampler_index));
+        open_gl.optGLUniform1i.?(program.samplers[sampler_index], @intCast(sampler_index));
     }
 }
 
-fn useProgramEnd(program: *OpenGLProgramCommon) void {
-    platform.optGLUseProgram.?(0);
+fn useProgramEnd(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
+    open_gl.optGLUseProgram.?(0);
 
     const position_array_index: i32 = program.vert_position_id;
     const normal_array_index: i32 = program.vert_normal_id;
@@ -1423,19 +1539,19 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     const texture_index_index: i32 = program.vert_texture_index_id;
 
     if (isValidArray(position_array_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(position_array_index));
+        open_gl.optGLDisableVertexAttribArray.?(@intCast(position_array_index));
     }
     if (isValidArray(normal_array_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(normal_array_index));
+        open_gl.optGLDisableVertexAttribArray.?(@intCast(normal_array_index));
     }
     if (isValidArray(color_array_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(color_array_index));
+        open_gl.optGLDisableVertexAttribArray.?(@intCast(color_array_index));
     }
     if (isValidArray(uv_array_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(uv_array_index));
+        open_gl.optGLDisableVertexAttribArray.?(@intCast(uv_array_index));
     }
     if (isValidArray(texture_index_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(texture_index_index));
+        open_gl.optGLDisableVertexAttribArray.?(@intCast(texture_index_index));
     }
 }
 
@@ -1445,7 +1561,7 @@ fn framebufferTexImage(open_gl: *OpenGL, slot: u32, format: i32, filter_type: i3
     gl.glBindTexture(slot, result);
 
     if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
-        _ = platform.optGLTexImage2DMultiSample.?(
+        _ = open_gl.optGLTexImage2DMultiSample.?(
             slot,
             open_gl.max_multi_sample_count,
             format,
@@ -1485,8 +1601,8 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     const has_depth: bool = (flags & @backingInt(FramebufferFlags.Depth)) != 0;
     const is_float: bool = (flags & @backingInt(FramebufferFlags.Float)) != 0;
 
-    platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&result.framebuffer_handle));
-    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, result.framebuffer_handle);
+    open_gl.optGLGenFramebuffersEXT.?(1, @ptrCast(&result.framebuffer_handle));
+    open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, result.framebuffer_handle);
 
     const slot = if (multisampled) GL_TEXTURE_2D_MULTISAMPLE else GL.GL_TEXTURE_2D;
     const filter_type: i32 = if (filtered) GL.GL_LINEAR else GL.GL_NEAREST;
@@ -1508,7 +1624,7 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
             width,
             height,
         );
-        platform.optGLFrameBufferTexture2DEXT.?(
+        open_gl.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
             GL_COLOR_ATTACHMENT0 + color_index,
             slot,
@@ -1516,7 +1632,7 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
             0,
         );
     }
-    platform.optGLDrawBuffers.?(color_buffer_count, @ptrCast(&ALL_COLOR_ATTACHMENTS));
+    open_gl.optGLDrawBuffers.?(color_buffer_count, @ptrCast(&ALL_COLOR_ATTACHMENTS));
     std.debug.assert(gl.glGetError() == GL.GL_NO_ERROR);
 
     if (has_depth) {
@@ -1524,7 +1640,7 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
             @intCast(width * height * DEPTH_COMPONENT_BYTES_PER_SAMPLE * sample_count);
 
         result.depth_handle = framebufferTexImage(open_gl, slot, DEPTH_COMPONENT_TYPE, filter_type, width, height);
-        platform.optGLFrameBufferTexture2DEXT.?(
+        open_gl.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
             GL_DEPTH_ATTACHMENT,
             slot,
@@ -1534,10 +1650,10 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     }
     std.debug.assert(gl.glGetError() == GL.GL_NO_ERROR);
 
-    const frame_buffer_status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
+    const frame_buffer_status: u32 = open_gl.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
     std.debug.assert(frame_buffer_status == GL_FRAME_BUFFER_COMPLETE);
 
-    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
+    open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
     gl.glBindTexture(slot, 0);
 
     open_gl.header.total_framebuffer_memory += result.gpu_memory_used;
@@ -1545,8 +1661,8 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     return result;
 }
 
-fn bindFrameBuffer(framebuffer: ?*Framebuffer, render_width: i32, render_height: i32) void {
-    if (platform.optGLBindFramebufferEXT) |glBindFramebuffer| {
+fn bindFrameBuffer(open_gl: *OpenGL, framebuffer: ?*Framebuffer, render_width: i32, render_height: i32) void {
+    if (open_gl.optGLBindFramebufferEXT) |glBindFramebuffer| {
         glBindFramebuffer(GL_FRAMEBUFFER, if (framebuffer) |f| f.framebuffer_handle else 0);
         gl.glViewport(0, 0, render_width, render_height);
     }
@@ -1561,7 +1677,7 @@ fn freeFramebuffer(open_gl: *OpenGL, framebuffer: *Framebuffer) void {
     open_gl.header.total_framebuffer_memory -= framebuffer.gpu_memory_used;
 
     if (framebuffer.framebuffer_handle != 0) {
-        platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&framebuffer.framebuffer_handle));
+        open_gl.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&framebuffer.framebuffer_handle));
         framebuffer.framebuffer_handle = 0;
     }
 
@@ -1579,8 +1695,8 @@ fn freeFramebuffer(open_gl: *OpenGL, framebuffer: *Framebuffer) void {
     }
 }
 
-fn freeProgram(program: *OpenGLProgramCommon) void {
-    platform.optGLDeleteProgram.?(program.program_handle);
+fn freeProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
+    open_gl.optGLDeleteProgram.?(program.program_handle);
     program.program_handle = 0;
 }
 
@@ -1596,8 +1712,8 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     // var light_index: u32 = 0;
     // while (light_index < open_gl.light_buffer_count) : (light_index += 1) {
     //     const light_buffer: *LightBuffer = &open_gl.light_buffers[light_index];
-    //     platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
-    //     platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
+    //     open_gl.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
+    //     open_gl.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
     //     gl.glDeleteTextures(1, &light_buffer.front_emission_texture);
     //     gl.glDeleteTextures(1, &light_buffer.back_emission_texture);
     //     gl.glDeleteTextures(1, &light_buffer.surface_color_texture);
@@ -1605,11 +1721,11 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //     light_buffer.* = .{};
     // }
 
-    freeProgram(&open_gl.z_bias_no_depth_peel.common);
-    freeProgram(&open_gl.z_bias_depth_peel.common);
-    freeProgram(&open_gl.peel_composite);
-    freeProgram(&open_gl.final_stretch);
-    freeProgram(&open_gl.resolve_multisample.common);
+    freeProgram(open_gl, &open_gl.z_bias_no_depth_peel.common);
+    freeProgram(open_gl, &open_gl.z_bias_depth_peel.common);
+    freeProgram(open_gl, &open_gl.peel_composite);
+    freeProgram(open_gl, &open_gl.final_stretch);
+    freeProgram(open_gl, &open_gl.resolve_multisample.common);
 
     // Create new dynamic resources.
     open_gl.current_settings = settings.*;
@@ -1715,56 +1831,56 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     //     );
     //
     //     // Up framebuffer.
-    //     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
-    //     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_all_framebuffer);
-    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //     open_gl.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
+    //     open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_all_framebuffer);
+    //     open_gl.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT0,
     //         GL.GL_TEXTURE_2D,
     //         light_buffer.front_emission_texture,
     //         0,
     //     );
-    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //     open_gl.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT1,
     //         GL.GL_TEXTURE_2D,
     //         light_buffer.back_emission_texture,
     //         0,
     //     );
-    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //     open_gl.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT2,
     //         GL.GL_TEXTURE_2D,
     //         light_buffer.surface_color_texture,
     //         0,
     //     );
-    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //     open_gl.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT3,
     //         GL.GL_TEXTURE_2D,
     //         light_buffer.normal_position_texture,
     //         0,
     //     );
-    //     platform.optGLDrawBuffers.?(4, @ptrCast(&ALL_COLOR_ATTACHMENTS));
+    //     open_gl.optGLDrawBuffers.?(4, @ptrCast(&ALL_COLOR_ATTACHMENTS));
     //
     //     // Down framebuffer.
-    //     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
-    //     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_emission_framebuffer);
-    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //     open_gl.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
+    //     open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_emission_framebuffer);
+    //     open_gl.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT0,
     //         GL.GL_TEXTURE_2D,
     //         light_buffer.front_emission_texture,
     //         0,
     //     );
-    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //     open_gl.optGLFrameBufferTexture2DEXT.?(
     //         GL_FRAMEBUFFER,
     //         GL_COLOR_ATTACHMENT1,
     //         GL.GL_TEXTURE_2D,
     //         light_buffer.back_emission_texture,
     //         0,
     //     );
-    //     platform.optGLDrawBuffers.?(2, @ptrCast(&ALL_COLOR_ATTACHMENTS));
+    //     open_gl.optGLDrawBuffers.?(2, @ptrCast(&ALL_COLOR_ATTACHMENTS));
     //
     //     texture_width = @divFloor(texture_width + 1, 2);
     //     texture_height = @divFloor(texture_height + 1, 2);
@@ -1801,16 +1917,16 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
 }
 
 fn beginScreenFill(open_gl: *OpenGL, framebuffer_handle: u32, width: i32, height: i32) void {
-    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, framebuffer_handle);
+    open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, framebuffer_handle);
     gl.glViewport(0, 0, width, height);
     gl.glScissor(0, 0, width, height);
     gl.glDepthFunc(GL.GL_ALWAYS);
 
-    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
+    open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
 }
 
-fn endScreenFill() void {
-    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
+fn endScreenFill(open_gl: *OpenGL) void {
+    open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
     gl.glDepthFunc(GL.GL_LEQUAL);
 }
 
@@ -1826,28 +1942,28 @@ fn resolveMultisample(
 
     useResolveMultisampleProgramBegin(open_gl, &open_gl.resolve_multisample);
 
-    platform.optGLActiveTexture.?(GL_TEXTURE0);
+    open_gl.optGLActiveTexture.?(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, from.depth_handle);
 
     var color_index: u32 = 0;
     while (color_index < COLOR_HANDLE_COUNT) : (color_index += 1) {
-        platform.optGLActiveTexture.?(GL_TEXTURE1 + color_index);
+        open_gl.optGLActiveTexture.?(GL_TEXTURE1 + color_index);
         gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, from.color_handle[color_index]);
     }
-    platform.optGLActiveTexture.?(GL_TEXTURE2);
+    open_gl.optGLActiveTexture.?(GL_TEXTURE2);
     gl.glBindTexture(GL.GL_TEXTURE_2D, mask_texture);
 
-    platform.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
+    open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
 
-    platform.optGLActiveTexture.?(GL_TEXTURE0);
+    open_gl.optGLActiveTexture.?(GL_TEXTURE0);
 
-    useProgramEnd(&open_gl.resolve_multisample.common);
+    useProgramEnd(open_gl, &open_gl.resolve_multisample.common);
 
-    endScreenFill();
+    endScreenFill(open_gl);
 }
 
-fn bindTexture(slot: u32, target: u32, handle: u32) void {
-    platform.optGLActiveTexture.?(slot);
+fn bindTexture(open_gl: *OpenGL, slot: u32, target: u32, handle: u32) void {
+    open_gl.optGLActiveTexture.?(slot);
     gl.glBindTexture(target, handle);
 }
 
@@ -1875,7 +1991,7 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
                 //     GL.GL_UNSIGNED_BYTE,
                 //     data,
                 // );
-                platform.optGLTexImage3D.?(
+                open_gl.optGLTexImage3D.?(
                     GL_TEXTURE_2D_ARRAY,
                     0,
                     open_gl.default_sprite_texture_format,
@@ -1894,7 +2010,7 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
                 gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
                 var mip: MipIterator = .iterateMips(texture.values.width, texture.values.height, op.data);
                 while (mip.isValid()) : (mip.advance()) {
-                    platform.optGLTexSubImage3D.?(
+                    open_gl.optGLTexSubImage3D.?(
                         GL_TEXTURE_2D_ARRAY,
                         @intCast(mip.level),
                         0,
@@ -1999,29 +2115,29 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     gl.glDisable(GL.GL_BLEND);
     gl.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA);
 
-    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
-    platform.optGLBufferData.?(
+    open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
+    open_gl.optGLBufferData.?(
         GL_ARRAY_BUFFER,
         commands.vertex_count * @sizeOf(TexturedVertex),
         commands.vertex_array,
         GL_STREAM_DRAW,
     );
 
-    platform.optGLBindBuffer.?(GL_ELEMENT_ARRAY_BUFFER, open_gl.index_buffer);
-    platform.optGLBufferData.?(
+    open_gl.optGLBindBuffer.?(GL_ELEMENT_ARRAY_BUFFER, open_gl.index_buffer);
+    open_gl.optGLBufferData.?(
         GL_ELEMENT_ARRAY_BUFFER,
         commands.index_count * @sizeOf(u16),
         commands.index_array,
         GL_STREAM_DRAW,
     );
 
-    platform.optGLActiveTexture.?(GL_TEXTURE0);
+    open_gl.optGLActiveTexture.?(GL_TEXTURE0);
 
     {
         var voxel_index: u32 = 0;
         while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
             gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_normal[voxel_index]);
-            platform.optGLTexSubImage3D.?(
+            open_gl.optGLTexSubImage3D.?(
                 GL_TEXTURE_3D,
                 0,
                 0,
@@ -2036,7 +2152,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
             );
 
             gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_color[voxel_index]);
-            platform.optGLTexSubImage3D.?(
+            open_gl.optGLTexSubImage3D.?(
                 GL_TEXTURE_3D,
                 0,
                 0,
@@ -2061,7 +2177,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
     manageTextures(open_gl, &open_gl.header.texture_queue);
 
-    const use_render_targets: bool = platform.optGLBindFramebufferEXT != null;
+    const use_render_targets: bool = open_gl.optGLBindFramebufferEXT != null;
     std.debug.assert(use_render_targets);
 
     const render_width: i32 = @intCast(settings.render_dim.width());
@@ -2113,7 +2229,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 header_at += @sizeOf(RenderEntryBeginPeels);
 
                 peel_header_restore = @ptrCast(header);
-                bindFrameBuffer(&open_gl.depth_peel_buffer, render_width, render_height);
+                bindFrameBuffer(open_gl, &open_gl.depth_peel_buffer, render_width, render_height);
 
                 gl.glScissor(0, 0, render_width, render_height);
                 if (on_peel_index == max_render_target_index) {
@@ -2143,10 +2259,10 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     if (true) {
                         resolveMultisample(open_gl, from, to, render_width, render_height, mask);
                     } else {
-                        platform.optGLBindFramebufferEXT.?(GL_READ_FRAMEBUFFER, from.framebuffer_handle);
-                        platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, to.framebuffer_handle);
+                        open_gl.optGLBindFramebufferEXT.?(GL_READ_FRAMEBUFFER, from.framebuffer_handle);
+                        open_gl.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, to.framebuffer_handle);
                         gl.glViewport(0, 0, window_width, window_height);
-                        platform.optGLBlitFrameBuffer.?(
+                        open_gl.optGLBlitFrameBuffer.?(
                             0,
                             0,
                             render_width,
@@ -2168,7 +2284,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     std.debug.assert(on_peel_index == max_render_target_index);
 
                     const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, 0);
-                    bindFrameBuffer(peel_buffer, render_width, render_height);
+                    bindFrameBuffer(open_gl, peel_buffer, render_width, render_height);
                     on_peel_index = 0;
                     gl.glEnable(GL.GL_BLEND);
                 }
@@ -2177,8 +2293,8 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 gl.glClear(GL.GL_DEPTH_BUFFER_BIT);
             },
             .RenderEntryTexturedQuads => {
-                platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
-                platform.optGLBindBuffer.?(GL_ELEMENT_ARRAY_BUFFER, open_gl.index_buffer);
+                open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
+                open_gl.optGLBindBuffer.?(GL_ELEMENT_ARRAY_BUFFER, open_gl.index_buffer);
 
                 const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryTexturedQuads);
@@ -2199,9 +2315,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, on_peel_index - 1);
 
                     program = &open_gl.z_bias_depth_peel;
-                    platform.optGLActiveTexture.?(GL_TEXTURE1);
+                    open_gl.optGLActiveTexture.?(GL_TEXTURE1);
                     gl.glBindTexture(GL.GL_TEXTURE_2D, peel_buffer.depth_handle);
-                    platform.optGLActiveTexture.?(GL_TEXTURE0);
+                    open_gl.optGLActiveTexture.?(GL_TEXTURE0);
 
                     if (on_peel_index == max_render_target_index) {
                         alpha_threshold = 0.9;
@@ -2210,16 +2326,16 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
                 var voxel_index: u32 = 0;
                 while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
-                    platform.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index);
+                    open_gl.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index);
                     gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_normal[voxel_index]);
 
-                    platform.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index + 1);
+                    open_gl.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index + 1);
                     gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_color[voxel_index]);
                 }
 
-                platform.optGLActiveTexture.?(GL_TEXTURE0);
+                open_gl.optGLActiveTexture.?(GL_TEXTURE0);
 
-                useZBiasProgramBegin(program, setup, alpha_threshold);
+                useZBiasProgramBegin(open_gl, program, setup, alpha_threshold);
 
                 if (entry.quad_textures) |quad_textures| {
                     // Multiple dispatch, slow path, for arbitrary sized textures.
@@ -2229,7 +2345,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                         const texture: RendererTexture = quad_textures[quad_index];
                         const texture_handle: u32 = getSpecialTextureHandleFor(open_gl, texture);
                         gl.glBindTexture(GL_TEXTURE_2D_ARRAY, texture_handle);
-                        platform.optGLDrawElementsBaseVertex.?(
+                        open_gl.optGLDrawElementsBaseVertex.?(
                             GL.GL_TRIANGLES,
                             6,
                             GL.GL_UNSIGNED_SHORT,
@@ -2241,7 +2357,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 } else {
                     // Single dispatch, fast path, for same sized textures.
                     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
-                    platform.optGLDrawElementsBaseVertex.?(
+                    open_gl.optGLDrawElementsBaseVertex.?(
                         GL.GL_TRIANGLES,
                         @intCast(6 * entry.quad_count),
                         GL.GL_UNSIGNED_SHORT,
@@ -2252,11 +2368,11 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
                 gl.glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
-                useProgramEnd(&program.common);
+                useProgramEnd(open_gl, &program.common);
                 if (peeling) {
-                    platform.optGLActiveTexture.?(GL_TEXTURE1);
+                    open_gl.optGLActiveTexture.?(GL_TEXTURE1);
                     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
-                    platform.optGLActiveTexture.?(GL_TEXTURE0);
+                    open_gl.optGLActiveTexture.?(GL_TEXTURE0);
                 }
             },
         }
@@ -2265,32 +2381,32 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     gl.glDisable(GL.GL_DEPTH_TEST);
     gl.glDisable(GL.GL_BLEND);
 
-    platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, open_gl.resolve_frame_buffer.framebuffer_handle);
+    open_gl.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, open_gl.resolve_frame_buffer.framebuffer_handle);
     gl.glViewport(0, 0, render_width, render_height);
     gl.glScissor(0, 0, render_width, render_height);
-    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
+    open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
 
-    useProgramBegin(&open_gl.peel_composite);
+    useProgramBegin(open_gl, &open_gl.peel_composite);
     var texture_bind_index: u32 = GL_TEXTURE0;
     var peel_index: u32 = 0;
     while (peel_index <= max_render_target_index) : (peel_index += 1) {
         const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, peel_index);
-        platform.optGLActiveTexture.?(texture_bind_index);
+        open_gl.optGLActiveTexture.?(texture_bind_index);
         texture_bind_index += 1;
         gl.glBindTexture(GL.GL_TEXTURE_2D, peel_buffer.color_handle[@backingInt(ColorHandleType.SurfaceReflection)]);
     }
-    // platform.optGLActiveTexture.?(texture_bind_index);
+    // open_gl.optGLActiveTexture.?(texture_bind_index);
     // texture_bind_index += 1;
     // gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_buffers[0].front_emission_texture);
-    // platform.optGLActiveTexture.?(texture_bind_index);
+    // open_gl.optGLActiveTexture.?(texture_bind_index);
     // texture_bind_index += 1;
     // gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_buffers[0].normal_position_texture);
 
-    platform.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
-    platform.optGLActiveTexture.?(GL_TEXTURE0);
-    useProgramEnd(&open_gl.peel_composite);
+    open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
+    open_gl.optGLActiveTexture.?(GL_TEXTURE0);
+    useProgramEnd(open_gl, &open_gl.peel_composite);
 
-    platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
+    open_gl.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
 
     gl.glViewport(
         0,
@@ -2320,12 +2436,12 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         draw_region.getHeight(),
     );
 
-    useProgramBegin(&open_gl.final_stretch);
+    useProgramBegin(open_gl, &open_gl.final_stretch);
     gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.resolve_frame_buffer.color_handle[0]);
-    platform.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
+    open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
-    platform.optGLActiveTexture.?(GL_TEXTURE0);
-    useProgramEnd(&open_gl.final_stretch);
+    open_gl.optGLActiveTexture.?(GL_TEXTURE0);
+    useProgramEnd(open_gl, &open_gl.final_stretch);
 }
 
 fn drawLineVertices(
@@ -2425,6 +2541,7 @@ fn drawRectangle(
 }
 
 pub fn displayBitmap(
+    open_gl: *OpenGL,
     width: i32,
     height: i32,
     draw_region: Rectangle2i,
@@ -2435,7 +2552,7 @@ pub fn displayBitmap(
 ) void {
     std.debug.assert(pitch == width * 4);
 
-    bindFrameBuffer(null, draw_region.getWidth(), draw_region.getHeight());
+    bindFrameBuffer(open_gl, null, draw_region.getWidth(), draw_region.getHeight());
 
     gl.glDisable(GL.GL_SCISSOR_TEST);
     gl.glDisable(GL.GL_BLEND);
@@ -2496,23 +2613,24 @@ pub fn displayBitmap(
 }
 
 fn createProgram(
+    open_gl: *OpenGL,
     defines: [*:0]const u8,
     header: [*:0]const u8,
     vertex_code: [*:0]const u8,
     fragment_code: [*:0]const u8,
     program: *OpenGLProgramCommon,
 ) u32 {
-    const glShaderSource = platform.optGLShaderSource.?;
-    const glCreateShader = platform.optGLCreateShader.?;
-    const glDeleteShader = platform.optGLDeleteShader.?;
-    const glCompileShader = platform.optGLCompileShader.?;
-    const glCreateProgram = platform.optGLCreateProgram.?;
-    const glLinkProgram = platform.optGLLinkProgram.?;
-    const glAttachShader = platform.optGLAttachShader.?;
-    const glValidateProgram = platform.optGLValidateProgram.?;
-    const glGetProgramiv = platform.optGLGetProgramiv.?;
-    const glGetShaderInfoLog = platform.optGLGetShaderInfoLog.?;
-    const glGetProgramInfoLog = platform.optGLGetProgramInfoLog.?;
+    const glShaderSource = open_gl.optGLShaderSource.?;
+    const glCreateShader = open_gl.optGLCreateShader.?;
+    const glDeleteShader = open_gl.optGLDeleteShader.?;
+    const glCompileShader = open_gl.optGLCompileShader.?;
+    const glCreateProgram = open_gl.optGLCreateProgram.?;
+    const glLinkProgram = open_gl.optGLLinkProgram.?;
+    const glAttachShader = open_gl.optGLAttachShader.?;
+    const glValidateProgram = open_gl.optGLValidateProgram.?;
+    const glGetProgramiv = open_gl.optGLGetProgramiv.?;
+    const glGetShaderInfoLog = open_gl.optGLGetShaderInfoLog.?;
+    const glGetProgramInfoLog = open_gl.optGLGetProgramInfoLog.?;
 
     const vertex_shader_id: u32 = glCreateShader(GL_VERTEX_SHADER);
     var vertex_shader_code = [_][*:0]const u8{
@@ -2563,11 +2681,11 @@ fn createProgram(
     glDeleteShader(fragment_shader_id);
 
     program.program_handle = program_id;
-    program.vert_position_id = platform.optGLGetAttribLocation.?(program_id, "VertP");
-    program.vert_normal_id = platform.optGLGetAttribLocation.?(program_id, "VertN");
-    program.vert_uv_id = platform.optGLGetAttribLocation.?(program_id, "VertUV");
-    program.vert_color_id = platform.optGLGetAttribLocation.?(program_id, "VertColor");
-    program.vert_texture_index_id = platform.optGLGetAttribLocation.?(program_id, "VertTextureIndex");
+    program.vert_position_id = open_gl.optGLGetAttribLocation.?(program_id, "VertP");
+    program.vert_normal_id = open_gl.optGLGetAttribLocation.?(program_id, "VertN");
+    program.vert_uv_id = open_gl.optGLGetAttribLocation.?(program_id, "VertUV");
+    program.vert_color_id = open_gl.optGLGetAttribLocation.?(program_id, "VertColor");
+    program.vert_texture_index_id = open_gl.optGLGetAttribLocation.?(program_id, "VertTextureIndex");
 
     program.sampler_count = 0;
 
@@ -2575,12 +2693,13 @@ fn createProgram(
 }
 
 fn linkSamplers(
+    open_gl: *OpenGL,
     program: *OpenGLProgramCommon,
     samplers: []const ?[]const u8,
 ) void {
     for (samplers) |sampler| {
         if (sampler) |sampler_name| {
-            const sampler_id: i32 = platform.optGLGetUniformLocation.?(program.program_handle, sampler_name.ptr);
+            const sampler_id: i32 = open_gl.optGLGetUniformLocation.?(program.program_handle, sampler_name.ptr);
             std.debug.assert(program.sampler_count < program.samplers.len);
             program.samplers[program.sampler_count] = sampler_id;
             program.sampler_count += 1;

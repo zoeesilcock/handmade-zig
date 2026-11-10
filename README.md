@@ -58,7 +58,7 @@ It expects some .bmp images and the renderer .dll file in the `data/renderer_tes
 * `win32-handmade-opengl.dll` (copy from `zig-out/bin` after running `zig build -Dpackage=RendererLibrary`).
 
 ```
-zig build hha-edit -Dpackage=RendererTest run-renderer-test
+zig build -Dpackage=RendererTest run-renderer-test
 ```
 
 ### Handmade ray

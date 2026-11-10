@@ -2857,7 +2857,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     ui.interaction.clear();
 }
 
-fn debugInit(assets: *Assets, render_dim: Vector2u) *DebugState {
+fn debugInit(assets: *Assets) *DebugState {
     var debug_state: *DebugState = memory.bootstrapPushStruct(
         DebugState,
         "debug_arena",
@@ -2884,6 +2884,8 @@ fn debugInit(assets: *Assets, render_dim: Vector2u) *DebugState {
     };
     debug_state.root_profile_element = debug_state.getElementFromEvent(&root_profile_event, null, 0);
 
+    // TODO: Stop doing any of the placement here! It should be all done at draw time.
+    const render_dim: Vector2u = .new(1920, 1080);
     _ = debug_state.addTree(
         debug_state.root_group,
         Vector2.new(
@@ -2967,7 +2969,7 @@ fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
 pub fn frameEnd(
     game_memory: *shared.Memory,
     input: *shared.GameInput,
-    render_commands: *renderer.RenderCommands,
+    opt_render_commands: ?*renderer.RenderCommands,
 ) callconv(.c) void {
     memory.zeroStruct(DebugEvent, &shared.global_debug_table.edit_event);
 
@@ -2984,20 +2986,26 @@ pub fn frameEnd(
 
     if (game_memory.debug_state == null) {
         if (getGameAssets(game_memory)) |assets| {
-            game_memory.debug_state = debugInit(assets, render_commands.settings.render_dim);
+            game_memory.debug_state = debugInit(assets);
         }
     }
 
     if (game_memory.debug_state) |debug_state| {
         if (getGameAssets(game_memory)) |assets| {
-            debugStart(
-                debug_state,
-                render_commands,
-                assets,
-                input,
-            );
+            if (opt_render_commands) |render_commands| {
+                debugStart(
+                    debug_state,
+                    render_commands,
+                    assets,
+                    input,
+                );
+            }
+
             debug_state.collateDebugRecords(event_count, &shared.global_debug_table.events[event_array_index]);
-            debugEnd(debug_state, input, game_memory);
+
+            if (opt_render_commands != null) {
+                debugEnd(debug_state, input, game_memory);
+            }
         }
     }
 }

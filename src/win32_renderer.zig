@@ -1,44 +1,38 @@
 const win32 = @import("win32").everything;
+const math = @import("math.zig");
 const renderer = @import("renderer.zig");
 
-pub const LOAD_RENDERER_ENTRY = "win32LoadRenderer";
+// Types.
+const Vector2u = math.Vector2u;
+const Rectangle2i = math.Rectangle2i;
+const PlatformRenderer = renderer.PlatformRenderer;
+const RenderCommands = renderer.RenderCommands;
 
-pub const win32LoadRendererType = ?*const fn (
+pub const win32LoadRendererType = fn (
     opt_window_dc: ?win32.HDC,
     limits: *renderer.PlatformRendererLimits,
-) callconv(.c) ?*renderer.PlatformRenderer;
+) callconv(.c) ?*PlatformRenderer;
 
-pub fn loadRendererDLL(file_name: [*:0]const u8) win32LoadRendererType {
-    var win32LoadRenderer: win32LoadRendererType = null;
-    if (win32.LoadLibraryA(file_name)) |renderer_dll| {
-        if (win32.GetProcAddress(renderer_dll, LOAD_RENDERER_ENTRY)) |procedure| {
-            win32LoadRenderer = @as(@TypeOf(win32LoadRenderer), @ptrCast(procedure));
-        }
-    }
-    return win32LoadRenderer;
-}
+pub const win32BeginFrameType = fn (
+    platform_renderer: *PlatformRenderer,
+    window_dim: Vector2u,
+    render_dim: Vector2u,
+    draw_region: Rectangle2i,
+) callconv(.c) ?*RenderCommands;
 
-pub fn initDefaultRenderer(
-    window: win32.HWND,
-    limits: *renderer.PlatformRendererLimits,
-) *renderer.PlatformRenderer {
-    // Load the renderer DLL and get the address of the init function.
-    const win32LoadRenderer: win32LoadRendererType = loadRendererDLL("win32-handmade-opengl.dll");
+pub const win32EndFrameType = fn (
+    platform_renderer: *PlatformRenderer,
+    frame: *RenderCommands,
+) callconv(.c) void;
 
-    if (win32LoadRenderer == null) {
-        _ = win32.MessageBoxA(
-            window,
-            "Please make sure win32_handmade_opengl.dll is present in the same directory as the exe.",
-            "Unable to load win32_handmade_opengl.dll",
-            win32.MB_ICONERROR,
-        );
-        win32.ExitProcess(0);
-    }
+pub const renderer_function_table_names: [3][*:0]const u8 = .{
+    "win32LoadRenderer",
+    "win32BeginFrame",
+    "win32EndFrame",
+};
 
-    // Initialize OpenGL so that we can render to our window. The win32 OpenGL startup code is contained within
-    // `win32_handmade_opengl.dll`, so we get the DC for our window and pass that to its `win32LoadRenderer`
-    // function so it can do all the startup for us.
-    const platform_renderer: *renderer.PlatformRenderer = win32LoadRenderer.?(win32.GetDC(window), limits).?;
-
-    return platform_renderer;
-}
+pub const RendererFunctionTable = struct {
+    win32LoadRenderer: ?*const win32LoadRendererType = null,
+    win32BeginFrame: ?*const win32BeginFrameType = null,
+    win32EndFrame: ?*const win32EndFrameType = null,
+};

@@ -5,6 +5,7 @@ const types = @import("types.zig");
 const shared = @import("shared.zig");
 const renderer = @import("renderer.zig");
 const opengl = @import("renderer_opengl.zig");
+const win32_opengl = @import("win32_opengl.zig");
 
 const gl = @import("gl_c");
 
@@ -82,103 +83,6 @@ var optWglChoosePixelFormatARB: ?*const WglChoosePixelFormatARB = null;
 
 const WglGetExtensionsStringEXT: type = fn (hdc: win32.HDC) callconv(.winapi) ?*u8;
 pub var optWglGetExtensionsStringEXT: ?*const WglGetExtensionsStringEXT = null;
-const GLBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(.winapi) void;
-pub var optGLBindFramebufferEXT: ?*const GLBindFramebufferEXT = null;
-const GLGenFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
-pub var optGLGenFramebuffersEXT: ?*const GLGenFramebuffersEXT = null;
-const GLDeleteFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
-pub var optGLDeleteFramebuffersEXT: ?*const GLDeleteFramebuffersEXT = null;
-const GLFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32) callconv(.winapi) void;
-pub var optGLFrameBufferTexture2DEXT: ?*const GLFrameBufferTexture2DEXT = null;
-const GLCheckFramebufferStatusEXT: type = fn (target: u32) callconv(.winapi) u32;
-pub var optGLCheckFramebufferStatusEXT: ?*const GLCheckFramebufferStatusEXT = null;
-const GLTexImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(.winapi) u32;
-pub var optGLTexImage2DMultiSample: ?*const GLTexImage2DMultiSample = null;
-const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y1: i32, dst_x0: i32, dst_y0: i32, dst_x1: i32, dst_y1: i32, mask: u32, filter: u32) callconv(.winapi) void;
-pub var optGLBlitFrameBuffer: ?*const GLBlitFrameBuffer = null;
-const GLCreateShader: type = fn (shader_type: u32) callconv(.winapi) u32;
-pub var optGLCreateShader: ?*const GLCreateShader = null;
-const GLDeleteShader: type = fn (shader: u32) callconv(.winapi) void;
-pub var optGLDeleteShader: ?*const GLDeleteShader = null;
-const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const [*:0]const u8, length: ?*i32) callconv(.winapi) void;
-pub var optGLShaderSource: ?*const GLShaderSource = null;
-const GLCompileShader: type = fn (shader: u32) callconv(.winapi) void;
-pub var optGLCompileShader: ?*const GLCompileShader = null;
-const GLCreateProgram: type = fn () callconv(.winapi) u32;
-pub var optGLCreateProgram: ?*const GLCreateProgram = null;
-const GLDeleteProgram: type = fn (program: u32) callconv(.winapi) void;
-pub var optGLDeleteProgram: ?*const GLDeleteProgram = null;
-const GLLinkProgram: type = fn (shader: u32) callconv(.winapi) void;
-pub var optGLLinkProgram: ?*const GLLinkProgram = null;
-const GLAttachShader: type = fn (program: u32, shader: u32) callconv(.winapi) void;
-pub var optGLAttachShader: ?*const GLAttachShader = null;
-const GLValidateProgram: type = fn (program: u32) callconv(.winapi) void;
-pub var optGLValidateProgram: ?*const GLValidateProgram = null;
-const GLGetProgramiv: type = fn (program: u32, pname: u32, params: *i32) callconv(.winapi) void;
-pub var optGLGetProgramiv: ?*const GLGetProgramiv = null;
-const GLGetShaderInfoLog: type = fn (shader: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(.winapi) void;
-pub var optGLGetShaderInfoLog: ?*const GLGetShaderInfoLog = null;
-const GLGetProgramInfoLog: type = fn (program: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(.winapi) void;
-pub var optGLGetProgramInfoLog: ?*const GLGetProgramInfoLog = null;
-const GLUseProgram: type = fn (program: u32) callconv(.winapi) void;
-pub var optGLUseProgram: ?*const GLUseProgram = null;
-const GLUniformMatrix4fv: type = fn (location: i32, count: i32, transpose: bool, value: *const f32) callconv(.winapi) void;
-pub var optGLUniformMatrix4fv: ?*const GLUniformMatrix4fv = null;
-const GLUniform1f: type = fn (location: i32, value: f32) callconv(.winapi) void;
-pub var optGLUniform1f: ?*const GLUniform1f = null;
-const GLUniform2fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
-pub var optGLUniform2fv: ?*const GLUniform2fv = null;
-const GLUniform3fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
-pub var optGLUniform3fv: ?*const GLUniform3fv = null;
-const GLUniform4fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
-pub var optGLUniform4fv: ?*const GLUniform4fv = null;
-const GLUniform1i: type = fn (location: i32, value: i32) callconv(.winapi) void;
-pub var optGLUniform1i: ?*const GLUniform1i = null;
-const GLGetUniformLocation: type = fn (program: u32, [*]const u8) callconv(.winapi) i32;
-pub var optGLGetUniformLocation: ?*const GLGetUniformLocation = null;
-const GLGetAttribLocation: type = fn (program: u32, name: [*]const u8) callconv(.winapi) i32;
-pub var optGLGetAttribLocation: ?*const GLGetAttribLocation = null;
-const GLEnableVertexAttribArray: type = fn (index: u32) callconv(.winapi) void;
-pub var optGLEnableVertexAttribArray: ?*const GLEnableVertexAttribArray = null;
-const GLDisableVertexAttribArray: type = fn (index: u32) callconv(.winapi) void;
-pub var optGLDisableVertexAttribArray: ?*const GLDisableVertexAttribArray = null;
-const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: ?*anyopaque) callconv(.winapi) void;
-pub var optGLVertexAttribPointer: ?*const GLVertexAttribPointer = null;
-const GLVertexAttribIPointer: type = fn (index: u32, size: i32, data_type: u32, stride: isize, pointer: ?*anyopaque) callconv(.winapi) void;
-pub var optGLVertexAttribIPointer: ?*const GLVertexAttribIPointer = null;
-const GLGenVertexArrays: type = fn (size: i32, arrays: ?*u32) callconv(.winapi) void;
-pub var optGLGenVertexArrays: ?*const GLGenVertexArrays = null;
-const GLBindVertexArray: type = fn (array: u32) callconv(.winapi) void;
-pub var optGLBindVertexArray: ?*const GLBindVertexArray = null;
-const GLDrawArrays: type = fn (mode: u32, first: i32, count: i32) callconv(.winapi) void;
-pub var optGLDrawArrays: ?*const GLDrawArrays = null;
-const GLDrawElements: type = fn (mode: u32, count: i32, index_type: u32, indices: ?*anyopaque) callconv(.winapi) void;
-pub var optGLDrawElements: ?*const GLDrawElements = null;
-const GLDrawElementsBaseVertex: type = fn (mode: u32, count: i32, index_type: u32, indices: ?*anyopaque, basevertex: i32) callconv(.winapi) void;
-pub var optGLDrawElementsBaseVertex: ?*const GLDrawElementsBaseVertex = null;
-const GLDebugProcArb = ?*const fn (source: u32, message_type: u32, id: u32, severity: u32, length: i32, message: [*]const u8, user_param: ?*const anyopaque) callconv(.winapi) void;
-const GLDebugMessageCallbackARB: type = fn (callback: GLDebugProcArb, user_param: ?*const anyopaque) callconv(.winapi) void;
-pub var optGLDebugMessageCallbackARB: ?*const GLDebugMessageCallbackARB = null;
-const GLDebugMessageControlARB: type = fn (source: u32, message_type: u32, severity: u32, count: i32, ids: [*]const i32, enabled: bool) callconv(.winapi) void;
-pub var optGLDebugMessageControlARB: ?*const GLDebugMessageControlARB = null;
-const GLGetStringi: type = fn (name: u32, index: u32) callconv(.winapi) ?*u8;
-pub var optGLGetStringi: ?*const GLGetStringi = null;
-const GLGenBuffers: type = fn (count: i32, buffers: *u32) callconv(.winapi) void;
-pub var optGLGenBuffers: ?*const GLGenBuffers = null;
-const GLBindBuffer: type = fn (target: u32, buffer: u32) callconv(.winapi) void;
-pub var optGLBindBuffer: ?*const GLBindBuffer = null;
-const GLBufferData: type = fn (target: u32, size: isize, data: *anyopaque, usage: u32) callconv(.winapi) void;
-pub var optGLBufferData: ?*const GLBufferData = null;
-const GLActiveTexture: type = fn (texture: u32) callconv(.winapi) void;
-pub var optGLActiveTexture: ?*const GLActiveTexture = null;
-const GLDrawBuffers: type = fn (n: u32, buffers: [*]const u32) callconv(.winapi) void;
-pub var optGLDrawBuffers: ?*const GLDrawBuffers = null;
-const GLBindFragDataLocation: type = fn (program: u32, color: u32, name: [*]const u8) callconv(.winapi) void;
-pub var optGLBindFragDataLocation: ?*const GLBindFragDataLocation = null;
-const GLTexImage3D: type = fn (target: u32, level: i32, internalformat: i32, width: isize, height: isize, depth: isize, border: i32, format: u32, type: u32, pixels: ?*const anyopaque) callconv(.winapi) void;
-pub var optGLTexImage3D: ?*const GLTexImage3D = null;
-const GLTexSubImage3D: type = fn (target: u32, level: i32, xoffset: i32, yoffset: i32, zoffset: i32, width: isize, height: isize, depth: isize, format: u32, type: u32, pixels: ?*const anyopaque) callconv(.winapi) void;
-pub var optGLTexSubImage3D: ?*const GLTexSubImage3D = null;
 
 const opengl_flags: c_int = if (INTERNAL)
     // 0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
@@ -371,8 +275,6 @@ pub fn initOpenGL(
         rendererAllocate(limits.texture_transfer_buffer_size).?,
     );
 
-    open_gl.header.beginFrame = &beginFrame;
-    open_gl.header.endFrame = &endFrame;
     loadWglExtensions(open_gl);
     setPixelFormat(open_gl, window_dc);
 
@@ -408,121 +310,117 @@ pub fn initOpenGL(
     }
 
     if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
-        optGLGetStringi = @ptrCast(win32.wglGetProcAddress("glGetStringi"));
-        std.debug.assert(optGLGetStringi != null);
+        open_gl.optGLGetStringi = @ptrCast(win32.wglGetProcAddress("glGetStringi"));
+        std.debug.assert(open_gl.optGLGetStringi != null);
 
-        const info = opengl.Info.get(is_modern_context);
+        const info = opengl.Info.get(open_gl, is_modern_context);
 
         if (info.gl_arb_framebuffer_object) {
-            optGLBindFramebufferEXT = @ptrCast(win32.wglGetProcAddress("glBindFramebufferEXT"));
-            optGLGenFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glGenFramebuffersEXT"));
-            optGLDeleteFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glDeleteFramebuffersEXT"));
-            optGLFrameBufferTexture2DEXT = @ptrCast(win32.wglGetProcAddress("glFramebufferTexture2D"));
-            optGLCheckFramebufferStatusEXT = @ptrCast(win32.wglGetProcAddress("glCheckFramebufferStatusEXT"));
+            open_gl.optGLBindFramebufferEXT = @ptrCast(win32.wglGetProcAddress("glBindFramebufferEXT"));
+            open_gl.optGLGenFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glGenFramebuffersEXT"));
+            open_gl.optGLDeleteFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glDeleteFramebuffersEXT"));
+            open_gl.optGLFrameBufferTexture2DEXT = @ptrCast(win32.wglGetProcAddress("glFramebufferTexture2D"));
+            open_gl.optGLCheckFramebufferStatusEXT = @ptrCast(win32.wglGetProcAddress("glCheckFramebufferStatusEXT"));
 
-            std.debug.assert(optGLBindFramebufferEXT != null);
-            std.debug.assert(optGLGenFramebuffersEXT != null);
-            std.debug.assert(optGLDeleteFramebuffersEXT != null);
-            std.debug.assert(optGLFrameBufferTexture2DEXT != null);
-            std.debug.assert(optGLCheckFramebufferStatusEXT != null);
+            std.debug.assert(open_gl.optGLBindFramebufferEXT != null);
+            std.debug.assert(open_gl.optGLGenFramebuffersEXT != null);
+            std.debug.assert(open_gl.optGLDeleteFramebuffersEXT != null);
+            std.debug.assert(open_gl.optGLFrameBufferTexture2DEXT != null);
+            std.debug.assert(open_gl.optGLCheckFramebufferStatusEXT != null);
         }
 
-        optGLTexImage2DMultiSample = @ptrCast(win32.wglGetProcAddress("glTexImage2DMultisample"));
-        optGLBlitFrameBuffer = @ptrCast(win32.wglGetProcAddress("glBlitFramebuffer"));
-        optGLCreateShader = @ptrCast(win32.wglGetProcAddress("glCreateShader"));
-        optGLDeleteShader = @ptrCast(win32.wglGetProcAddress("glDeleteShader"));
-        optGLShaderSource = @ptrCast(win32.wglGetProcAddress("glShaderSource"));
-        optGLCompileShader = @ptrCast(win32.wglGetProcAddress("glCompileShader"));
-        optGLCreateProgram = @ptrCast(win32.wglGetProcAddress("glCreateProgram"));
-        optGLDeleteProgram = @ptrCast(win32.wglGetProcAddress("glDeleteProgram"));
-        optGLLinkProgram = @ptrCast(win32.wglGetProcAddress("glLinkProgram"));
-        optGLAttachShader = @ptrCast(win32.wglGetProcAddress("glAttachShader"));
-        optGLValidateProgram = @ptrCast(win32.wglGetProcAddress("glValidateProgram"));
-        optGLGetProgramiv = @ptrCast(win32.wglGetProcAddress("glGetProgramiv"));
-        optGLGetShaderInfoLog = @ptrCast(win32.wglGetProcAddress("glGetShaderInfoLog"));
-        optGLGetProgramInfoLog = @ptrCast(win32.wglGetProcAddress("glGetProgramInfoLog"));
-        optGLUseProgram = @ptrCast(win32.wglGetProcAddress("glUseProgram"));
-        optGLUniformMatrix4fv = @ptrCast(win32.wglGetProcAddress("glUniformMatrix4fv"));
-        optGLUniform1f = @ptrCast(win32.wglGetProcAddress("glUniform1f"));
-        optGLUniform2fv = @ptrCast(win32.wglGetProcAddress("glUniform2fv"));
-        optGLUniform3fv = @ptrCast(win32.wglGetProcAddress("glUniform3fv"));
-        optGLUniform4fv = @ptrCast(win32.wglGetProcAddress("glUniform4fv"));
-        optGLUniform1i = @ptrCast(win32.wglGetProcAddress("glUniform1i"));
-        optGLGetUniformLocation = @ptrCast(win32.wglGetProcAddress("glGetUniformLocation"));
-        optGLGetAttribLocation = @ptrCast(win32.wglGetProcAddress("glGetAttribLocation"));
-        optGLEnableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glEnableVertexAttribArray"));
-        optGLDisableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glDisableVertexAttribArray"));
-        optGLVertexAttribPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribPointer"));
-        optGLVertexAttribIPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribIPointer"));
-        optGLGenVertexArrays = @ptrCast(win32.wglGetProcAddress("glGenVertexArrays"));
-        optGLBindVertexArray = @ptrCast(win32.wglGetProcAddress("glBindVertexArray"));
-        optGLDrawArrays = @ptrCast(win32.wglGetProcAddress("glDrawArrays"));
-        optGLDrawElements = @ptrCast(win32.wglGetProcAddress("glDrawElements"));
-        optGLDrawElementsBaseVertex = @ptrCast(win32.wglGetProcAddress("glDrawElementsBaseVertex"));
-        optGLDebugMessageCallbackARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageCallbackARB"));
-        optGLDebugMessageControlARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageControlARB"));
-        optGLGenBuffers = @ptrCast(win32.wglGetProcAddress("glGenBuffers"));
-        optGLBindBuffer = @ptrCast(win32.wglGetProcAddress("glBindBuffer"));
-        optGLBufferData = @ptrCast(win32.wglGetProcAddress("glBufferData"));
-        optGLActiveTexture = @ptrCast(win32.wglGetProcAddress("glActiveTexture"));
-        optGLDrawBuffers = @ptrCast(win32.wglGetProcAddress("glDrawBuffers"));
-        optGLBindFragDataLocation = @ptrCast(win32.wglGetProcAddress("glBindFragDataLocation"));
-        optGLTexImage3D = @ptrCast(win32.wglGetProcAddress("glTexImage3D"));
-        optGLTexSubImage3D = @ptrCast(win32.wglGetProcAddress("glTexSubImage3D"));
+        open_gl.optGLTexImage2DMultiSample = @ptrCast(win32.wglGetProcAddress("glTexImage2DMultisample"));
+        open_gl.optGLBlitFrameBuffer = @ptrCast(win32.wglGetProcAddress("glBlitFramebuffer"));
+        open_gl.optGLCreateShader = @ptrCast(win32.wglGetProcAddress("glCreateShader"));
+        open_gl.optGLDeleteShader = @ptrCast(win32.wglGetProcAddress("glDeleteShader"));
+        open_gl.optGLShaderSource = @ptrCast(win32.wglGetProcAddress("glShaderSource"));
+        open_gl.optGLCompileShader = @ptrCast(win32.wglGetProcAddress("glCompileShader"));
+        open_gl.optGLCreateProgram = @ptrCast(win32.wglGetProcAddress("glCreateProgram"));
+        open_gl.optGLDeleteProgram = @ptrCast(win32.wglGetProcAddress("glDeleteProgram"));
+        open_gl.optGLLinkProgram = @ptrCast(win32.wglGetProcAddress("glLinkProgram"));
+        open_gl.optGLAttachShader = @ptrCast(win32.wglGetProcAddress("glAttachShader"));
+        open_gl.optGLValidateProgram = @ptrCast(win32.wglGetProcAddress("glValidateProgram"));
+        open_gl.optGLGetProgramiv = @ptrCast(win32.wglGetProcAddress("glGetProgramiv"));
+        open_gl.optGLGetShaderInfoLog = @ptrCast(win32.wglGetProcAddress("glGetShaderInfoLog"));
+        open_gl.optGLGetProgramInfoLog = @ptrCast(win32.wglGetProcAddress("glGetProgramInfoLog"));
+        open_gl.optGLUseProgram = @ptrCast(win32.wglGetProcAddress("glUseProgram"));
+        open_gl.optGLUniformMatrix4fv = @ptrCast(win32.wglGetProcAddress("glUniformMatrix4fv"));
+        open_gl.optGLUniform1f = @ptrCast(win32.wglGetProcAddress("glUniform1f"));
+        open_gl.optGLUniform2fv = @ptrCast(win32.wglGetProcAddress("glUniform2fv"));
+        open_gl.optGLUniform3fv = @ptrCast(win32.wglGetProcAddress("glUniform3fv"));
+        open_gl.optGLUniform4fv = @ptrCast(win32.wglGetProcAddress("glUniform4fv"));
+        open_gl.optGLUniform1i = @ptrCast(win32.wglGetProcAddress("glUniform1i"));
+        open_gl.optGLGetUniformLocation = @ptrCast(win32.wglGetProcAddress("glGetUniformLocation"));
+        open_gl.optGLGetAttribLocation = @ptrCast(win32.wglGetProcAddress("glGetAttribLocation"));
+        open_gl.optGLEnableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glEnableVertexAttribArray"));
+        open_gl.optGLDisableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glDisableVertexAttribArray"));
+        open_gl.optGLVertexAttribPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribPointer"));
+        open_gl.optGLVertexAttribIPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribIPointer"));
+        open_gl.optGLGenVertexArrays = @ptrCast(win32.wglGetProcAddress("glGenVertexArrays"));
+        open_gl.optGLBindVertexArray = @ptrCast(win32.wglGetProcAddress("glBindVertexArray"));
+        open_gl.optGLDrawArrays = @ptrCast(win32.wglGetProcAddress("glDrawArrays"));
+        open_gl.optGLDrawElements = @ptrCast(win32.wglGetProcAddress("glDrawElements"));
+        open_gl.optGLDrawElementsBaseVertex = @ptrCast(win32.wglGetProcAddress("glDrawElementsBaseVertex"));
+        open_gl.optGLDebugMessageCallbackARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageCallbackARB"));
+        open_gl.optGLDebugMessageControlARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageControlARB"));
+        open_gl.optGLGenBuffers = @ptrCast(win32.wglGetProcAddress("glGenBuffers"));
+        open_gl.optGLBindBuffer = @ptrCast(win32.wglGetProcAddress("glBindBuffer"));
+        open_gl.optGLBufferData = @ptrCast(win32.wglGetProcAddress("glBufferData"));
+        open_gl.optGLActiveTexture = @ptrCast(win32.wglGetProcAddress("glActiveTexture"));
+        open_gl.optGLDrawBuffers = @ptrCast(win32.wglGetProcAddress("glDrawBuffers"));
+        open_gl.optGLBindFragDataLocation = @ptrCast(win32.wglGetProcAddress("glBindFragDataLocation"));
+        open_gl.optGLTexImage3D = @ptrCast(win32.wglGetProcAddress("glTexImage3D"));
+        open_gl.optGLTexSubImage3D = @ptrCast(win32.wglGetProcAddress("glTexSubImage3D"));
 
-        if (optGLDrawArrays == null) {
+        if (open_gl.optGLDrawArrays == null) {
             const opengl32 = win32.LoadLibraryA("opengl32.dll");
-            optGLDrawArrays = @ptrCast(win32.GetProcAddress(opengl32, "glDrawArrays"));
+            open_gl.optGLDrawArrays = @ptrCast(win32.GetProcAddress(opengl32, "glDrawArrays"));
         }
 
-        std.debug.assert(optGLTexImage2DMultiSample != null);
-        std.debug.assert(optGLBlitFrameBuffer != null);
-        std.debug.assert(optGLCreateShader != null);
-        std.debug.assert(optGLDeleteShader != null);
-        std.debug.assert(optGLShaderSource != null);
-        std.debug.assert(optGLCompileShader != null);
-        std.debug.assert(optGLCreateProgram != null);
-        std.debug.assert(optGLDeleteProgram != null);
-        std.debug.assert(optGLLinkProgram != null);
-        std.debug.assert(optGLAttachShader != null);
-        std.debug.assert(optGLValidateProgram != null);
-        std.debug.assert(optGLGetProgramiv != null);
-        std.debug.assert(optGLGetShaderInfoLog != null);
-        std.debug.assert(optGLGetProgramInfoLog != null);
-        std.debug.assert(optGLUseProgram != null);
-        std.debug.assert(optGLUniformMatrix4fv != null);
-        std.debug.assert(optGLUniform1f != null);
-        std.debug.assert(optGLUniform2fv != null);
-        std.debug.assert(optGLUniform3fv != null);
-        std.debug.assert(optGLUniform4fv != null);
-        std.debug.assert(optGLUniform1i != null);
-        std.debug.assert(optGLGetUniformLocation != null);
-        std.debug.assert(optGLGetAttribLocation != null);
-        std.debug.assert(optGLEnableVertexAttribArray != null);
-        std.debug.assert(optGLDisableVertexAttribArray != null);
-        std.debug.assert(optGLVertexAttribPointer != null);
-        std.debug.assert(optGLVertexAttribIPointer != null);
-        std.debug.assert(optGLGenVertexArrays != null);
-        std.debug.assert(optGLBindVertexArray != null);
-        std.debug.assert(optGLDrawArrays != null);
-        std.debug.assert(optGLDrawElements != null);
-        std.debug.assert(optGLDrawElementsBaseVertex != null);
-        std.debug.assert(optGLDebugMessageCallbackARB != null);
-        std.debug.assert(optGLDebugMessageControlARB != null);
-        std.debug.assert(optGLGenBuffers != null);
-        std.debug.assert(optGLBindBuffer != null);
-        std.debug.assert(optGLBufferData != null);
-        std.debug.assert(optGLActiveTexture != null);
-        std.debug.assert(optGLDrawBuffers != null);
-        std.debug.assert(optGLBindFragDataLocation != null);
-        std.debug.assert(optGLTexImage3D != null);
-        std.debug.assert(optGLTexSubImage3D != null);
+        std.debug.assert(open_gl.optGLTexImage2DMultiSample != null);
+        std.debug.assert(open_gl.optGLBlitFrameBuffer != null);
+        std.debug.assert(open_gl.optGLCreateShader != null);
+        std.debug.assert(open_gl.optGLDeleteShader != null);
+        std.debug.assert(open_gl.optGLShaderSource != null);
+        std.debug.assert(open_gl.optGLCompileShader != null);
+        std.debug.assert(open_gl.optGLCreateProgram != null);
+        std.debug.assert(open_gl.optGLDeleteProgram != null);
+        std.debug.assert(open_gl.optGLLinkProgram != null);
+        std.debug.assert(open_gl.optGLAttachShader != null);
+        std.debug.assert(open_gl.optGLValidateProgram != null);
+        std.debug.assert(open_gl.optGLGetProgramiv != null);
+        std.debug.assert(open_gl.optGLGetShaderInfoLog != null);
+        std.debug.assert(open_gl.optGLGetProgramInfoLog != null);
+        std.debug.assert(open_gl.optGLUseProgram != null);
+        std.debug.assert(open_gl.optGLUniformMatrix4fv != null);
+        std.debug.assert(open_gl.optGLUniform1f != null);
+        std.debug.assert(open_gl.optGLUniform2fv != null);
+        std.debug.assert(open_gl.optGLUniform3fv != null);
+        std.debug.assert(open_gl.optGLUniform4fv != null);
+        std.debug.assert(open_gl.optGLUniform1i != null);
+        std.debug.assert(open_gl.optGLGetUniformLocation != null);
+        std.debug.assert(open_gl.optGLGetAttribLocation != null);
+        std.debug.assert(open_gl.optGLEnableVertexAttribArray != null);
+        std.debug.assert(open_gl.optGLDisableVertexAttribArray != null);
+        std.debug.assert(open_gl.optGLVertexAttribPointer != null);
+        std.debug.assert(open_gl.optGLVertexAttribIPointer != null);
+        std.debug.assert(open_gl.optGLGenVertexArrays != null);
+        std.debug.assert(open_gl.optGLBindVertexArray != null);
+        std.debug.assert(open_gl.optGLDrawArrays != null);
+        std.debug.assert(open_gl.optGLDrawElements != null);
+        std.debug.assert(open_gl.optGLDrawElementsBaseVertex != null);
+        std.debug.assert(open_gl.optGLDebugMessageCallbackARB != null);
+        std.debug.assert(open_gl.optGLDebugMessageControlARB != null);
+        std.debug.assert(open_gl.optGLGenBuffers != null);
+        std.debug.assert(open_gl.optGLBindBuffer != null);
+        std.debug.assert(open_gl.optGLBufferData != null);
+        std.debug.assert(open_gl.optGLActiveTexture != null);
+        std.debug.assert(open_gl.optGLDrawBuffers != null);
+        std.debug.assert(open_gl.optGLBindFragDataLocation != null);
+        std.debug.assert(open_gl.optGLTexImage3D != null);
+        std.debug.assert(open_gl.optGLTexSubImage3D != null);
 
-        optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
-        if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
-            _ = wglSwapIntervalEXT(1);
-        }
-
+        win32_opengl.setVSync(open_gl, true);
         opengl.init(open_gl, info, open_gl.supports_srgb_frame_buffer);
     } else {
         outputLastGLError("Failed to make modern context current");
@@ -543,7 +441,7 @@ fn processTextureQueue(platform_renderer: *PlatformRenderer, texture_queue: *Tex
     opengl.manageTextures(@ptrCast(@alignCast(platform_renderer)), texture_queue);
 }
 
-fn beginFrame(
+pub export fn win32BeginFrame(
     platform_renderer: *PlatformRenderer,
     window_dim: Vector2u,
     render_dim: Vector2u,
@@ -558,7 +456,7 @@ fn beginFrame(
     return result;
 }
 
-fn endFrame(platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void {
+pub export fn win32EndFrame(platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void {
     const open_gl: *OpenGL = @ptrCast(@alignCast(platform_renderer));
     opengl.endFrame(open_gl, frame);
     _ = win32.SwapBuffers(win32.wglGetCurrentDC());
@@ -566,6 +464,11 @@ fn endFrame(platform_renderer: *PlatformRenderer, frame: *RenderCommands) callco
 
 pub fn setVSync(open_gl: *OpenGL, enabled: bool) void {
     _ = open_gl;
+
+    if (optWglSwapIntervalEXT == null) {
+        optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
+    }
+
     if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
         _ = wglSwapIntervalEXT(if (enabled) 1 else 0);
     }

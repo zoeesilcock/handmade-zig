@@ -291,7 +291,39 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             .max_special_texture_count = 0,
             .texture_transfer_buffer_size = 16 * 1024 * 1024,
         };
-        const platform_renderer: *PlatformRenderer = win32_renderer.initDefaultRenderer(window, &limits);
+
+        // Load the renderer DLL and get the address of the init function.
+        var win32LoadRenderer: ?*const win32_renderer.win32LoadRendererType = null;
+        var win32BeginFrame: ?*const win32_renderer.win32BeginFrameType = null;
+        var win32EndFrame: ?*const win32_renderer.win32EndFrameType = null;
+        if (win32.LoadLibraryA("win32-handmade-opengl.dll")) |renderer_dll| {
+            if (win32.GetProcAddress(renderer_dll, win32_renderer.renderer_function_table_names[0])) |procedure| {
+                win32LoadRenderer = @as(@TypeOf(win32LoadRenderer), @ptrCast(procedure));
+            }
+
+            if (win32.GetProcAddress(renderer_dll, win32_renderer.renderer_function_table_names[1])) |procedure| {
+                win32BeginFrame = @as(@TypeOf(win32BeginFrame), @ptrCast(procedure));
+            }
+
+            if (win32.GetProcAddress(renderer_dll, win32_renderer.renderer_function_table_names[2])) |procedure| {
+                win32EndFrame = @as(@TypeOf(win32EndFrame), @ptrCast(procedure));
+            }
+        }
+
+        if (win32LoadRenderer == null or win32BeginFrame == null or win32EndFrame == null) {
+            _ = win32.MessageBoxA(
+                window,
+                "Please make sure win32_handmade_opengl.dll is present in the same directory as the exe.",
+                "Unable to load win32_handmade_opengl.dll",
+                win32.MB_ICONERROR,
+            );
+            win32.ExitProcess(0);
+        }
+
+        // Initialize OpenGL so that we can render to our window. The win32 OpenGL startup code is contained within
+        // `win32_handmade_opengl.dll`, so we get the DC for our window and pass that to its `win32LoadRenderer`
+        // function so it can do all the startup for us.
+        const platform_renderer: *renderer.PlatformRenderer = win32LoadRenderer.?(win32.GetDC(window), &limits).?;
 
         // Initialize the test scene. This has nothing to do with the renderer API, it's just a way of making a data
         // structure we can use later to figure out what we want to render ever frame.
@@ -343,7 +375,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
 
             // Tell the rendere to being rendering a framethat occupies `draw_region` inside a window that is
             // `window_width` by `window_height` in size.
-            const frame: *RenderCommands = platform_renderer.beginFrame(
+            const frame: *RenderCommands = win32BeginFrame.?(
                 platform_renderer,
                 .new(window_width, window_height),
                 render_dim,
@@ -369,7 +401,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             group.end();
 
             // Tell the renderer to actually render the frame.
-            platform_renderer.endFrame(platform_renderer, frame);
+            win32EndFrame.?(platform_renderer, frame);
 
             const seconds_elapsed: f32 = frame_stats.update();
             camera_shift_t += 0.1 * seconds_elapsed;
