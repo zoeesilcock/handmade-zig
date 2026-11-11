@@ -128,3 +128,6 @@ llvm-mca .\zig-out\bin\handmade-dll.asm -bottleneck-analysis -o .\zig-out\bin\ha
 ### PNG
 * https://www.w3.org/TR/png-3/
 * https://www.rfc-editor.org/rfc/rfc1951
+
+### Lighting
+* https://jcgt.org/published/0008/02/01/

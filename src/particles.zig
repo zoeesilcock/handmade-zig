@@ -248,7 +248,7 @@ fn updateAndRenderFire(
         //     .scaledTo(dispersion_coefficient * (cel_center.density - cel_up.density)));
 
         // Simulate particle.
-        a.p = a.p.plus(a.ddp.scaledTo(0.5 * math.square(delta_time))
+        a.p = a.p.plus(a.ddp.scaledTo(0.5 * math.square(f32, delta_time))
             .plus(a.dp.scaledTo(delta_time)));
         a.dp = a.dp.plus(a.ddp.scaledTo(delta_time));
         a.c = a.c.plus(a.dc.scaledTo(delta_time));

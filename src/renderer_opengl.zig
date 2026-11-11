@@ -279,6 +279,8 @@ const RenderEntryFullClear = renderer.RenderEntryFullClear;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const MAX_LIGHT_INTENSITY = lighting.MAX_LIGHT_INTENSITY;
 const LIGHT_LOOKUP_VOXEL_DIM = lighting.LIGHT_LOOKUP_VOXEL_DIM;
+const LIGHT_COLOR_LOOKUP_SQUARE_DIM = lighting.LIGHT_COLOR_LOOKUP_SQUARE_DIM;
+const LIGHT_DEPTH_LOOKUP_SQUARE_DIM = lighting.LIGHT_DEPTH_LOOKUP_SQUARE_DIM;
 const MAX_LIGHT_PROBE_COUNT = lighting.MAX_LIGHT_PROBE_COUNT;
 const MAX_LIGHT_OCCLUDER_COUNT = lighting.MAX_LIGHT_OCCLUDER_COUNT;
 const LIGHT_FLOOR_VALUE = lighting.LIGHT_FLOOR_VALUE;
@@ -460,14 +462,11 @@ pub const OpenGL = extern struct {
     light_probe_position: [MAX_LIGHT_PROBE_COUNT]Vector3 = undefined,
     light_occluders: [MAX_LIGHT_OCCLUDER_COUNT]renderer.LightingBox = undefined,
 
-    light_data_normal: [LIGHT_DIRECTION_COUNT][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]Vector3 = undefined,
-    light_data_color: [LIGHT_DIRECTION_COUNT][LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM]Color3 = undefined,
+    light_color_data: [math.square(usize, LIGHT_COLOR_LOOKUP_SQUARE_DIM) * math.cube(usize, LIGHT_LOOKUP_VOXEL_DIM)]Color3 = undefined,
+    light_depth_data: [math.square(usize, LIGHT_DEPTH_LOOKUP_SQUARE_DIM) * math.cube(usize, LIGHT_LOOKUP_VOXEL_DIM)]f32 = undefined,
 
-    light_data_handle_normal: [LIGHT_DIRECTION_COUNT]u32 = @splat(0),
-    light_data_handle_color: [LIGHT_DIRECTION_COUNT]u32 = @splat(0),
-
-    // light_buffer_count: u32 = 0,
-    // light_buffers: [12]LightBuffer = undefined,
+    light_color_atlas_handle: u32,
+    light_depth_atlas_handle: u32,
 
     render_commands: RenderCommands,
 
@@ -741,49 +740,46 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    gl.glGenTextures(LIGHT_DIRECTION_COUNT, @ptrCast(&open_gl.light_data_handle_normal));
-    gl.glGenTextures(LIGHT_DIRECTION_COUNT, @ptrCast(&open_gl.light_data_handle_color));
-    var voxel_index: u32 = 0;
-    while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
-        var handle: u32 = open_gl.light_data_handle_normal[voxel_index];
-        gl.glBindTexture(GL_TEXTURE_3D, handle);
-        open_gl.optGLTexImage3D.?(
-            GL_TEXTURE_3D,
+    gl.glGenTextures(1, @ptrCast(&open_gl.light_color_atlas_handle));
+    gl.glGenTextures(1, @ptrCast(&open_gl.light_depth_atlas_handle));
+    {
+        var handle: u32 = open_gl.light_color_atlas_handle;
+        gl.glBindTexture(GL.GL_TEXTURE_2D, handle);
+        gl.glTexImage2D(
+            GL.GL_TEXTURE_2D,
             0,
             GL_RGB32F,
-            LIGHT_LOOKUP_VOXEL_DIM,
-            LIGHT_LOOKUP_VOXEL_DIM,
-            LIGHT_LOOKUP_VOXEL_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
             0,
             GL.GL_RGB,
             GL.GL_FLOAT,
             null,
         );
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        // gl.glTexParameteri(GL.GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
-        handle = open_gl.light_data_handle_color[voxel_index];
-        gl.glBindTexture(GL_TEXTURE_3D, handle);
-        open_gl.optGLTexImage3D.?(
-            GL_TEXTURE_3D,
+        handle = open_gl.light_depth_atlas_handle;
+        gl.glBindTexture(GL.GL_TEXTURE_2D, handle);
+        gl.glTexImage2D(
+            GL.GL_TEXTURE_2D,
             0,
-            GL_RGB32F,
-            LIGHT_LOOKUP_VOXEL_DIM,
-            LIGHT_LOOKUP_VOXEL_DIM,
-            LIGHT_LOOKUP_VOXEL_DIM,
+            GL_R32F,
+            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
             0,
-            GL.GL_RGB,
+            GL.GL_RED,
             GL.GL_FLOAT,
             null,
         );
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        // gl.glTexParameteri(GL.GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     }
 
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
@@ -947,14 +943,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\uniform vec3 VoxelMinCorner;
         \\uniform vec3 VoxelInverseTotalDimension;
         \\
-        \\uniform sampler3D LightSamplerN0;
-        \\uniform sampler3D LightSamplerC0;
-        \\uniform sampler3D LightSamplerN1;
-        \\uniform sampler3D LightSamplerC1;
-        \\uniform sampler3D LightSamplerN2;
-        \\uniform sampler3D LightSamplerC2;
-        \\uniform sampler3D LightSamplerN3;
-        \\uniform sampler3D LightSamplerC3;
+        \\uniform sampler2D LightColorSampler;
+        \\uniform sampler2D LightDepthSampler;
         \\
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
@@ -966,6 +956,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\out vec4 BlendUnitColor;
         \\
+        \\#if 0
         \\vec3 GetIrradiance(vec4 LightV, vec3 LightNormalEncoded, vec3 ReflectionNormal)
         \\{
         \\  vec3 Result = vec3(0, 0, 0);
@@ -1003,6 +994,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\  return(Result);
         \\}
+        \\#endif
         \\
         \\vec3 SumLight()
         \\{
@@ -1012,21 +1004,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  vec3 VoxelRelativePosition = WorldPosition - VoxelMinCorner;
         \\  vec3 VoxelUVW = VoxelInverseTotalDimension * VoxelRelativePosition;
         \\
-        \\  vec3 LightN0 = texture(LightSamplerN0, VoxelUVW).xyz;
-        \\  vec4 LightC0 = texture(LightSamplerC0, VoxelUVW);
-        \\  vec3 LightN1 = texture(LightSamplerN1, VoxelUVW).xyz;
-        \\  vec4 LightC1 = texture(LightSamplerC1, VoxelUVW);
-        \\  vec3 LightN2 = texture(LightSamplerN2, VoxelUVW).xyz;
-        \\  vec4 LightC2 = texture(LightSamplerC2, VoxelUVW);
-        \\  vec3 LightN3 = texture(LightSamplerN3, VoxelUVW).xyz;
-        \\  vec4 LightC3 = texture(LightSamplerC3, VoxelUVW);
-        \\
-        \\  vec3 LightData = GetIrradiance(LightC0, LightN0, R);
-        // \\  LightData += GetIrradiance(LightC1, LightN1, R);
-        // \\  LightData += GetIrradiance(LightC2, LightN2, R);
-        // \\  LightData += GetIrradiance(LightC3, LightN3, R);
-        \\
-        \\  return(LightData.rgb);
+        \\  return(vec3(1, 1, 1));
         \\}
         \\
         \\void main(void)
@@ -1091,14 +1069,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         &.{
             "TextureSampler",
             "DepthSampler",
-            "LightSamplerN0",
-            "LightSamplerC0",
-            "LightSamplerN1",
-            "LightSamplerC1",
-            "LightSamplerN2",
-            "LightSamplerC2",
-            "LightSamplerN3",
-            "LightSamplerC3",
+            "LightColorSampler",
+            "LightDepthSampler",
         },
     );
 
@@ -1911,7 +1883,7 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
 
     gl.glBindTexture(GL.GL_TEXTURE_1D, 0);
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
-    gl.glBindTexture(GL_TEXTURE_3D, 0);
+    // gl.glBindTexture(GL_TEXTURE_3D, 0);
 
     wgl.setVSync(open_gl, open_gl.current_settings.request_vsync);
 }
@@ -2078,11 +2050,8 @@ pub fn beginFrame(
     commands.light_probe_position = &open_gl.light_probe_position;
 
     commands.light_voxel_dimension = LIGHT_LOOKUP_VOXEL_DIM;
-    var index: u32 = 0;
-    while (index < LIGHT_DIRECTION_COUNT) : (index += 1) {
-        commands.light_voxel_normal[index] = &open_gl.light_data_normal[index];
-        commands.light_voxel_color[index] = &open_gl.light_data_color[index];
-    }
+    commands.light_voxel_color = &open_gl.light_color_data;
+    commands.light_voxel_depth = &open_gl.light_depth_data;
 
     commands.max_light_occluder_count = MAX_LIGHT_OCCLUDER_COUNT;
     commands.light_occluder_count = 0;
@@ -2132,43 +2101,33 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     );
 
     open_gl.optGLActiveTexture.?(GL_TEXTURE0);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);
+    gl.glTexSubImage2D(
+        GL.GL_TEXTURE_2D,
+        0,
+        0,
+        0,
+        LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
+        LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
+        GL.GL_RGB,
+        GL.GL_FLOAT,
+        &open_gl.light_color_data,
+    );
 
-    {
-        var voxel_index: u32 = 0;
-        while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
-            gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_normal[voxel_index]);
-            open_gl.optGLTexSubImage3D.?(
-                GL_TEXTURE_3D,
-                0,
-                0,
-                0,
-                0,
-                LIGHT_LOOKUP_VOXEL_DIM,
-                LIGHT_LOOKUP_VOXEL_DIM,
-                LIGHT_LOOKUP_VOXEL_DIM,
-                GL.GL_RGB,
-                GL.GL_FLOAT,
-                &open_gl.light_data_normal[voxel_index],
-            );
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_depth_atlas_handle);
+    gl.glTexSubImage2D(
+        GL.GL_TEXTURE_2D,
+        0,
+        0,
+        0,
+        LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
+        LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
+        GL.GL_RED,
+        GL.GL_FLOAT,
+        &open_gl.light_depth_data,
+    );
 
-            gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_color[voxel_index]);
-            open_gl.optGLTexSubImage3D.?(
-                GL_TEXTURE_3D,
-                0,
-                0,
-                0,
-                0,
-                LIGHT_LOOKUP_VOXEL_DIM,
-                LIGHT_LOOKUP_VOXEL_DIM,
-                LIGHT_LOOKUP_VOXEL_DIM,
-                GL.GL_RGB,
-                GL.GL_FLOAT,
-                &open_gl.light_data_color[voxel_index],
-            );
-        }
-    }
-
-    gl.glBindTexture(GL_TEXTURE_3D, 0);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
 
     const settings: *RenderSettings = &commands.settings;
     if (!settings.equals(&open_gl.current_settings)) {
@@ -2324,14 +2283,11 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     }
                 }
 
-                var voxel_index: u32 = 0;
-                while (voxel_index < LIGHT_DIRECTION_COUNT) : (voxel_index += 1) {
-                    open_gl.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index);
-                    gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_normal[voxel_index]);
+                open_gl.optGLActiveTexture.?(GL_TEXTURE2);
+                gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);
 
-                    open_gl.optGLActiveTexture.?(GL_TEXTURE2 + 2 * voxel_index + 1);
-                    gl.glBindTexture(GL_TEXTURE_3D, open_gl.light_data_handle_color[voxel_index]);
-                }
+                open_gl.optGLActiveTexture.?(GL_TEXTURE3);
+                gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_depth_atlas_handle);
 
                 open_gl.optGLActiveTexture.?(GL_TEXTURE0);
 

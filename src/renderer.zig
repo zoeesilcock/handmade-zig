@@ -266,8 +266,8 @@ pub const RenderCommands = extern struct {
     light_probe_position: [*]Vector3, // [max_light_probe_count]
 
     light_voxel_dimension: u32,
-    light_voxel_color: [LIGHT_DIRECTION_COUNT][*]Color3, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
-    light_voxel_normal: [LIGHT_DIRECTION_COUNT][*]Vector3, // [light_voxel_dimension][light_voxel_dimension][light_voxel_dimension]
+    light_voxel_color: [*]Color3,
+    light_voxel_depth: [*]f32,
 
     max_light_occluder_count: u32,
     light_occluder_count: u32,
@@ -448,7 +448,11 @@ pub const RenderGroup = extern struct {
         if (self.pushRenderElement(RenderEntryBeginPeels)) |entry| {
             // For sRGB mode, this color needs to be squared.
             entry.clear_color = color;
-            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
+            self.last_setup.fog_color = .new(
+                math.square(f32, color.r()),
+                math.square(f32, color.g()),
+                math.square(f32, color.b()),
+            );
         }
     }
 
@@ -464,7 +468,11 @@ pub const RenderGroup = extern struct {
         if (self.pushRenderElement(RenderEntryFullClear)) |entry| {
             // For sRGB mode, this color needs to be squared.
             entry.clear_color = color;
-            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
+            self.last_setup.fog_color = .new(
+                math.square(f32, color.r()),
+                math.square(f32, color.g()),
+                math.square(f32, color.b()),
+            );
         }
     }
 
@@ -494,7 +502,7 @@ pub const RenderGroup = extern struct {
             .fog_end_distance = 1,
             .clip_alpha_start_distance = 0,
             .clip_alpha_end_distance = 1,
-            .fog_color = .new(math.square(0.15), math.square(0.15), math.square(0.15)),
+            .fog_color = .new(math.square(f32, 0.15), math.square(f32, 0.15), math.square(f32, 0.15)),
             .clip_rect = .fromMinMax(.new(-1, -1), .new(1, 1)),
         };
         self.pushSetup(&initial_setup);

@@ -515,7 +515,7 @@ pub fn ensureRegionIsUnpacked(
             } else {
 
                 // TODO: Think about what we actually are OK with this value being.
-                const max_allowed_distance_squared: f32 = math.square(1000);
+                const max_allowed_distance_squared: f32 = math.square(f32, 1000);
                 const distance_from_origin: f32 = entity.position.lengthSquared();
                 const too_far_for_precision: bool = distance_from_origin > max_allowed_distance_squared;
 

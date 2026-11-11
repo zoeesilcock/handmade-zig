@@ -489,11 +489,11 @@ pub fn moveEntity(
     acceleration: Vector3,
 ) void {
     // Calculate movement delta.
-    var entity_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
+    var entity_delta = acceleration.scaledTo(0.5 * math.square(f32, delta_time))
         .plus(entity.velocity.scaledTo(delta_time));
     entity.velocity = acceleration.scaledTo(delta_time).plus(entity.velocity);
 
-    // std.debug.assert(entity.velocity.lengthSquared() <= math.square(sim_region.max_entity_velocity));
+    // std.debug.assert(entity.velocity.lengthSquared() <= math.square(f32, sim_region.max_entity_velocity));
 
     var distance_remaining = entity.distance_limit;
     if (distance_remaining == 0) {
@@ -815,7 +815,7 @@ pub fn updateCameraForEntityMovement(
 
     var delta_position: Vector3 = ddp.scaledTo(0.5 * delta_time * delta_time).plus(camera.dp.scaledTo(delta_time));
     if (delta_position.lengthSquared() < total_delta_position.lengthSquared() or
-        dp_target.minus(dp).hadamardProduct(camera.movement_mask).lengthSquared() < math.square(0.001))
+        dp_target.minus(dp).hadamardProduct(camera.movement_mask).lengthSquared() < math.square(f32, 0.001))
     {
         position = position.plus(delta_position);
     } else {
@@ -874,7 +874,7 @@ pub fn getClosestTraversable(
     defer TimedBlock.endFunction(@src(), .GetClosestTraversable);
 
     var found: bool = false;
-    var closest_distance_squared: f32 = math.square(1000);
+    var closest_distance_squared: f32 = math.square(f32, 1000);
     var iterator: EntityIterator = .iterateAllEntities(sim_region);
     while (iterator.entity) |test_entity| : (iterator.advance()) {
         var point_index: u32 = 0;
@@ -951,7 +951,7 @@ pub fn getClosestEntityWithBrain(
     opt_max_radius: ?f32,
 ) ClosestEntity {
     var result: ClosestEntity = .{};
-    result.distance_squared = math.square(opt_max_radius orelse 20);
+    result.distance_squared = math.square(f32, opt_max_radius orelse 20);
 
     var iterator: EntityIterator = .iterateAllEntities(sim_region);
     while (iterator.entity) |test_entity| : (iterator.advance()) {

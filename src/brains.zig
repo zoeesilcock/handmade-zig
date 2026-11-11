@@ -218,7 +218,7 @@ fn executeBrainHero(
             if (controller.start_button.wasPressed()) {
                 if (opt_head) |head| {
                     var opt_closest_hero: ?*Entity = null;
-                    var closest_hero_squared: f32 = math.square(10.0);
+                    var closest_hero_squared: f32 = math.square(f32, 10.0);
 
                     var iterator: EntityIterator = .iterateAllEntities(sim_region);
                     while (iterator.entity) |test_entity| : (iterator.advance()) {
@@ -423,7 +423,7 @@ pub fn executeBrain(
                         sim.getClosestEntityWithBrain(sim_region, head.position, .BrainHero, null);
 
                     if (closest.entity) |hero| {
-                        // if (closest_hero_squared > math.square(3.0)) {
+                        // if (closest_hero_squared > math.square(f32, 3.0)) {
                         var target_traversable: TraversableReference = undefined;
                         if (sim.getClosestTraversableAlongRay(
                             sim_region,

@@ -140,6 +140,7 @@ fn Vector2Type(comptime ScalarType: type) type {
         pub const dividedBy = Shared.dividedBy;
         pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
+        pub const absoluteValue = Shared.absoluteValue;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
         pub const dotProduct = Shared.dotProduct;
@@ -350,6 +351,7 @@ fn Vector3Type(comptime ScalarType: type) type {
         pub const dividedByF = Shared.dividedByF;
         pub const divideFByMe = Shared.divideFByMe;
         pub const scaledTo = Shared.scaledTo;
+        pub const absoluteValue = Shared.absoluteValue;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
         pub const dotProduct = Shared.dotProduct;
@@ -489,6 +491,7 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const dividedBy = Shared.dividedBy;
         pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
+        pub const absoluteValue = Shared.absoluteValue;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
         pub const dotProduct = Shared.dotProduct;
@@ -586,6 +589,7 @@ fn Color3Type(comptime ScalarType: type) type {
         pub const dividedBy = Shared.dividedBy;
         pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
+        pub const absoluteValue = Shared.absoluteValue;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
         pub const dotProduct = Shared.dotProduct;
@@ -632,9 +636,9 @@ fn Color4Type(comptime ScalarType: type) type {
 
         pub inline fn newFromSRGB(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType, w_value: ScalarType) Self {
             return Self.new(
-                square(x_value),
-                square(y_value),
-                square(z_value),
+                square(ScalarType, x_value),
+                square(ScalarType, y_value),
+                square(ScalarType, z_value),
                 w_value,
             );
         }
@@ -704,6 +708,7 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const dividedBy = Shared.dividedBy;
         pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
+        pub const absoluteValue = Shared.absoluteValue;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
         pub const dotProduct = Shared.dotProduct;
@@ -793,6 +798,17 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
             return Self{ .values = @as(VectorType, self.values) * @as(VectorType, @splat(scalar)) };
         }
 
+        pub fn absoluteValue(self: Self) Self {
+            var result = Self.zero();
+
+            var array: [dimension_count]ScalarType = self.values;
+            for (&array, 0..) |elem, axis_index| {
+                result.setValueAt(axis_index, @abs(elem));
+            }
+
+            return result;
+        }
+
         pub fn clamp01(self: *const Self) Self {
             var result = Self.zero();
 
@@ -842,7 +858,7 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         pub fn normalizeOrZero(self: Self) Self {
             var result: Self = Self.zero();
             const length_squared: f32 = self.lengthSquared();
-            if (length_squared > square(0.0001)) {
+            if (length_squared > square(ScalarType, 0.0001)) {
                 result = self.scaledTo(1 / @sqrt(length_squared));
             }
             return result;
@@ -1600,12 +1616,8 @@ test "add two matrices together" {
     try std.testing.expect(result.values[1].values[1] == 2);
 }
 
-pub fn square(a: f32) f32 {
+pub fn square(T: type, a: T) T {
     return a * a;
-}
-
-pub fn squareV4(vector: @Vector(4, f32)) @Vector(4, f32) {
-    return vector * vector;
 }
 
 pub fn cube(T: type, a: T) T {
@@ -1729,18 +1741,18 @@ pub inline fn sRGB255ToLinear1(color: Color) Color {
     const inverse_255: f32 = 1.0 / 255.0;
 
     return Color.new(
-        square(inverse_255 * color.r()),
-        square(inverse_255 * color.g()),
-        square(inverse_255 * color.b()),
+        square(f32, inverse_255 * color.r()),
+        square(f32, inverse_255 * color.g()),
+        square(f32, inverse_255 * color.b()),
         inverse_255 * color.a(),
     );
 }
 
 pub inline fn linearToSRGB(color: Color) Color {
     return Color.new(
-        square(color.r()),
-        square(color.g()),
-        square(color.b()),
+        square(f32, color.r()),
+        square(f32, color.g()),
+        square(f32, color.b()),
         color.a(),
     );
 }
@@ -1853,6 +1865,32 @@ pub fn multiplyAlpha(color: u32) u32 {
         (color2 << 16) |
         (color1 << 8) |
         (color0 << 0);
+
+    return result;
+}
+
+pub fn octahedralFromUnitVector(v: Vector3) Vector2 {
+    const one_norm: f32 = @abs(v.x()) + @abs(v.y()) + @abs(v.z());
+    var result: Vector2 = v.xy().scaledTo(1 / one_norm);
+    if (v.z() < 0) {
+        _ = result.setX(intrinsics.signOf(result.x()) * (1 - @abs(result.y())));
+        _ = result.setY(intrinsics.signOf(result.y()) * (1 - @abs(result.x())));
+    }
+    return result;
+}
+
+pub fn unitVectorFromOctahedral(o: Vector2) Vector3 {
+    var ox: f32 = o.x();
+    var oy: f32 = o.y();
+    const sum_xy: f32 = @abs(ox) + @abs(oy);
+    const oz: f32 = 1 - sum_xy;
+    if (sum_xy > 1) {
+        ox = intrinsics.signOfF32(o.x()) * (1 - @abs(o.y()));
+        oy = intrinsics.signOfF32(o.y()) * (1 - @abs(o.x()));
+    }
+
+    var result: Vector3 = .new(o.x(), o.y(), oz);
+    result = result.normalized();
 
     return result;
 }
