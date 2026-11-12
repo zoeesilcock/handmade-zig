@@ -1661,41 +1661,49 @@ pub fn endLightingComputation(
             while (y < hot_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < hot_dimension) : (x += 1) {
-                    var ty: u32 = 0;
-                    while (ty < LIGHT_COLOR_LOOKUP_SQUARE_DIM) : (ty += 1) {
-                        var tx: u32 = 0;
-                        while (tx < LIGHT_COLOR_LOOKUP_SQUARE_DIM) : (tx += 1) {
-                            //
-
+                    var ty: u32 = 1;
+                    while (ty < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (ty += 1) {
+                        var tx: u32 = 1;
+                        while (tx < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (tx += 1) {
                             var light_c: Color3 = .zero();
                             var light_d: f32 = 0;
 
                             if (TEST_LIGHT_SPHERE) {
                                 var o_xy: Vector2 = .new(
-                                    @as(f32, @floatFromInt(tx)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)),
-                                    @as(f32, @floatFromInt(ty)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)),
+                                    @as(f32, @floatFromInt(tx - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
+                                    @as(f32, @floatFromInt(ty - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
                                 );
                                 o_xy = o_xy.scaledTo(2).minus(.new(1, 1));
 
                                 const sample_direction: Vector3 = math.unitVectorFromOctahedral(o_xy);
 
-                                const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
-                                const voxel_uvw: Vector3 = inverse_hot_dimension.hadamardProduct(voxel_center_position);
+                                if (true) {
+                                    const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
+                                    const voxel_uvw: Vector3 = inverse_hot_dimension.hadamardProduct(voxel_center_position);
 
-                                {
-                                    var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
-                                    const light_distance: f32 = light_normal.length();
-                                    light_normal = light_normal.normalizeOrZero();
+                                    {
+                                        var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
+                                        const light_distance: f32 = light_normal.length();
+                                        light_normal = light_normal.normalizeOrZero();
 
-                                    var light_alpha: f32 = 1.0 - 3.0 * light_distance;
-                                    light_alpha *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
-                                    light_alpha = math.clampf01(light_alpha);
+                                        var light_alpha: f32 = 1.0 - 3.0 * light_distance;
+                                        light_alpha *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
+                                        light_alpha = math.clampf01(light_alpha);
 
-                                    light_c = light_color.scaledTo(
-                                        light_alpha * math.clampf01(light_normal.dotProduct(sample_direction)),
+                                        light_c = light_color.scaledTo(
+                                            light_alpha * math.clampf01(light_normal.dotProduct(sample_direction)),
+                                        );
+                                        light_d = MAX_LIGHT_DEPTH;
+                                    }
+                                } else {
+                                    light_c = .new(
+                                        if (sample_direction.x() > 0) 1 else 0.1,
+                                        if (sample_direction.y() > 0) 1 else 0.1,
+                                        if (sample_direction.z() > 0) 1 else 0.1,
                                     );
-                                    light_d = MAX_LIGHT_DEPTH;
                                 }
+
+                                // light_c = .new(0.5 + 0.5 * o_xy.x(), 0.5 + 0.5 * o_xy.y(), 0);
                             }
 
                             if (TEST_LIGHT_CHECKERBOARD) {
@@ -1721,17 +1729,16 @@ pub fn endLightingComputation(
 
                             const element_index_color: u32 =
                                 (z * hot_dimension * hot_dimension * oct_color_dimension * oct_color_dimension) +
-                                (y * oct_color_dimension * hot_dimension * oct_color_dimension) +
-                                (x * oct_color_dimension) +
-                                (ty * hot_dimension * oct_color_dimension) + tx;
+                                (y * hot_dimension * oct_color_dimension) +
+                                (ty * hot_dimension * hot_dimension * oct_color_dimension) +
+                                (x * oct_color_dimension) + tx;
                             const element_index_depth: u32 =
                                 (z * hot_dimension * hot_dimension * oct_depth_dimension * oct_depth_dimension) +
-                                (y * oct_depth_dimension * hot_dimension * oct_depth_dimension) +
-                                (x * oct_depth_dimension) +
-                                (ty * hot_dimension * oct_depth_dimension) + tx;
-                            commands.light_voxel_color[element_index_color] =
-                                commands.light_voxel_color[element_index_color].plus(light_c);
-                            commands.light_voxel_depth[element_index_depth] += light_d;
+                                (y * hot_dimension * oct_depth_dimension) +
+                                (ty * hot_dimension * hot_dimension * oct_depth_dimension) +
+                                (x * oct_depth_dimension) + tx;
+                            commands.light_voxel_color[element_index_color] = light_c;
+                            commands.light_voxel_depth[element_index_depth] = light_d;
                         }
                     }
                 }

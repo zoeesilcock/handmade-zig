@@ -426,6 +426,7 @@ pub const OpenGL = extern struct {
     vertex_buffer: u32 = 0,
     index_buffer: u32 = 0,
     screen_fill_vertex_buffer: u32 = 0,
+    light_map_debug_buffer: u32 = 0,
 
     reserved_blit_texture: u32 = 0,
 
@@ -681,22 +682,8 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     open_gl.optGLGenBuffers.?(1, &open_gl.vertex_buffer);
     open_gl.optGLGenBuffers.?(1, &open_gl.index_buffer);
 
-    {
-        open_gl.optGLGenBuffers.?(1, &open_gl.screen_fill_vertex_buffer);
-        open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
-        var vertices: [4]TexturedVertex = [_]TexturedVertex{
-            .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .color = 0xffffffff },
-            .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .color = 0xffffffff },
-            .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .color = 0xffffffff },
-            .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .color = 0xffffffff },
-        };
-        open_gl.optGLBufferData.?(
-            GL_ARRAY_BUFFER,
-            vertices.len * @sizeOf(TexturedVertex),
-            &vertices,
-            GL_STATIC_DRAW,
-        );
-    }
+    open_gl.optGLGenBuffers.?(1, &open_gl.screen_fill_vertex_buffer);
+    open_gl.optGLGenBuffers.?(1, &open_gl.light_map_debug_buffer);
 
     const all_zeroes: u32 = 0;
     gl.glGenTextures(1, &open_gl.single_pixel_all_zeroes_texture);
@@ -756,11 +743,6 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             GL.GL_FLOAT,
             null,
         );
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        // gl.glTexParameteri(GL.GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
         handle = open_gl.light_depth_atlas_handle;
         gl.glBindTexture(GL.GL_TEXTURE_2D, handle);
@@ -775,11 +757,6 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             GL.GL_FLOAT,
             null,
         );
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        // gl.glTexParameteri(GL.GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     }
 
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
@@ -837,6 +814,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\#define LIGHTING_DISABLED %d
         \\#define MAX_LIGHT_INTENSITY %f
         \\#define LIGHT_FLOOR_VALUE %f
+        \\#define LIGHT_LOOKUP_VOXEL_DIM %u
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
@@ -845,6 +823,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
             @as(i32, @intCast(@intFromBool(lighting_disabled))),
             MAX_LIGHT_INTENSITY,
             LIGHT_FLOOR_VALUE,
+            @as(u64, @intCast(LIGHT_LOOKUP_VOXEL_DIM)),
         },
     );
     const vertex_code =
@@ -996,6 +975,23 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\}
         \\#endif
         \\
+        \\vec2 SignNotZero(vec2 V)
+        \\{
+        \\  vec2 Result;
+        \\
+        \\  Result.x = (V.x < 0) ? -1.0 : 1.0;
+        \\  Result.y = (V.y < 0) ? -1.0 : 1.0;
+        \\
+        \\  return(Result);
+        \\}
+        \\
+        \\vec4 SampleLighting(vec2 Oct, vec3 Voxel)
+        \\{
+        \\  vec4 Result = vec4(1, 1, 1, 1);
+        \\
+        \\  return(Result);
+        \\}
+        \\
         \\vec3 SumLight()
         \\{
         \\  vec3 I = WorldPosition - CameraPosition;
@@ -1003,8 +999,39 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\  vec3 VoxelRelativePosition = WorldPosition - VoxelMinCorner;
         \\  vec3 VoxelUVW = VoxelInverseTotalDimension * VoxelRelativePosition;
+        \\  vec3 VoxelRelative = LIGHT_LOOKUP_VOXEL_DIM * VoxelUVW;
+        \\  vec3 VoxelI = floor(VoxelRelative);
+        \\  VoxelRelative -= VoxelI;
         \\
-        \\  return(vec3(1, 1, 1));
+        \\  float OneNorm = abs(R.x) + abs(R.y) + abs(R.z);
+        \\  vec2 Oct = (1.0 / OneNorm) * R.xy;
+        \\  if (R.z < 0)
+        \\  {
+        \\    Oct.xy = SignNotZero(R.xy) * (1.0 - abs(Oct.xy));
+        \\  }
+        \\
+        \\  vec4 S000 = SampleLighting(Oct, VoxelI + vec3(0, 0, 0));
+        \\  vec4 S100 = SampleLighting(Oct, VoxelI + vec3(1, 0, 0));
+        \\  vec4 S010 = SampleLighting(Oct, VoxelI + vec3(0, 1, 0));
+        \\  vec4 S110 = SampleLighting(Oct, VoxelI + vec3(1, 1, 0));
+        \\  vec4 S001 = SampleLighting(Oct, VoxelI + vec3(0, 0, 1));
+        \\  vec4 S101 = SampleLighting(Oct, VoxelI + vec3(1, 0, 1));
+        \\  vec4 S011 = SampleLighting(Oct, VoxelI + vec3(0, 1, 1));
+        \\  vec4 S111 = SampleLighting(Oct, VoxelI + vec3(1, 1, 1));
+        \\
+        \\  vec4 S00 = mix(S000, S001, VoxelRelative.z);
+        \\  vec4 S10 = mix(S100, S101, VoxelRelative.z);
+        \\  vec4 S01 = mix(S010, S011, VoxelRelative.z);
+        \\  vec4 S11 = mix(S110, S111, VoxelRelative.z);
+        \\
+        \\  vec4 S0 = mix(S00, S01, VoxelRelative.y);
+        \\  vec4 S1 = mix(S10, S11, VoxelRelative.y);
+        \\
+        \\  vec4 S = mix(S0, S1, VoxelRelative.x);
+        \\
+        \\  vec3 Result = S.rgb;
+        \\
+        \\  return(Result);
         \\}
         \\
         \\void main(void)
@@ -1881,9 +1908,61 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MIN_FILTER, min_filter);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MAG_FILTER, mag_filter);
 
+    const light_sampling: u32 = GL.GL_NEAREST;
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, light_sampling);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, light_sampling);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // gl.glTexParameteri(GL.GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_depth_atlas_handle);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, light_sampling);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, light_sampling);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // gl.glTexParameteri(GL.GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
     gl.glBindTexture(GL.GL_TEXTURE_1D, 0);
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
     // gl.glBindTexture(GL_TEXTURE_3D, 0);
+
+    {
+        open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
+        var vertices: [4]TexturedVertex = [_]TexturedVertex{
+            .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .color = 0xffffffff },
+            .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .color = 0xffffffff },
+            .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .color = 0xffffffff },
+            .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .color = 0xffffffff },
+        };
+        open_gl.optGLBufferData.?(GL_ARRAY_BUFFER, vertices.len * @sizeOf(TexturedVertex), &vertices, GL_STATIC_DRAW);
+    }
+
+    {
+        const v_span: f32 = 0.125;
+        const u_span: f32 = v_span / 32.0;
+        const uv_span: Vector2 = .new(u_span, v_span);
+        const uv_center: Vector2 = .new(0.2375, 0.55);
+        const uv_min: Vector2 = uv_center.minus(uv_span);
+        const uv_max: Vector2 = uv_center.plus(uv_span);
+        const top_y: f32 = 0;
+        const x_dim: f32 = 9.0 / 16.0;
+
+        open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.light_map_debug_buffer);
+        var vertices: [8]TexturedVertex = [_]TexturedVertex{
+            .{ .position = .new(-1, top_y, 0, 1), .normal = .zero(), .uv = .new(uv_min.x(), uv_max.y()), .color = 0xffffffff },
+            .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(uv_min.x(), uv_min.y()), .color = 0xffffffff },
+            .{ .position = .new(-1 + x_dim, top_y, 0, 1), .normal = .zero(), .uv = .new(uv_max.x(), uv_max.y()), .color = 0xffffffff },
+            .{ .position = .new(-1 + x_dim, -1, 0, 1), .normal = .zero(), .uv = .new(uv_max.x(), uv_min.y()), .color = 0xffffffff },
+
+            .{ .position = .new(1 - x_dim, top_y, 0, 1), .normal = .zero(), .uv = .new(uv_min.x(), uv_max.y()), .color = 0xffffffff },
+            .{ .position = .new(1 - x_dim, -1, 0, 1), .normal = .zero(), .uv = .new(uv_min.x(), uv_min.y()), .color = 0xffffffff },
+            .{ .position = .new(1, top_y, 0, 1), .normal = .zero(), .uv = .new(uv_max.x(), uv_max.y()), .color = 0xffffffff },
+            .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(uv_max.x(), uv_min.y()), .color = 0xffffffff },
+        };
+        open_gl.optGLBufferData.?(GL_ARRAY_BUFFER, vertices.len * @sizeOf(TexturedVertex), &vertices, GL_STATIC_DRAW);
+    }
+    open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, 0);
 
     wgl.setVSync(open_gl, open_gl.current_settings.request_vsync);
 }
@@ -2395,6 +2474,16 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     useProgramBegin(open_gl, &open_gl.final_stretch);
     gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.resolve_frame_buffer.color_handle[0]);
     open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
+    useProgramEnd(open_gl, &open_gl.final_stretch);
+
+    open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.light_map_debug_buffer);
+    useProgramBegin(open_gl, &open_gl.final_stretch);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);
+    open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
+
+    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_depth_atlas_handle);
+    open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 4, 4);
+
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
     open_gl.optGLActiveTexture.?(GL_TEXTURE0);
     useProgramEnd(open_gl, &open_gl.final_stretch);
