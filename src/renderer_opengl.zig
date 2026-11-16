@@ -764,6 +764,7 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
 
 const shader_header_code =
     \\// Header code
+    \\#define Square(a) ((a)*(a))
     \\#define LengthSq(a) dot(a, a)
     \\
     \\float clamp01MapToRange(float min, float max, float value) {
@@ -815,6 +816,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\#define MAX_LIGHT_INTENSITY %f
         \\#define LIGHT_FLOOR_VALUE %f
         \\#define LIGHT_LOOKUP_VOXEL_DIM %u
+        \\#define LIGHT_COLOR_LOOKUP_SQUARE_DIM %u
+        \\#define LIGHT_DEPTH_LOOKUP_SQUARE_DIM %u
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
@@ -824,6 +827,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
             MAX_LIGHT_INTENSITY,
             LIGHT_FLOOR_VALUE,
             @as(u64, @intCast(LIGHT_LOOKUP_VOXEL_DIM)),
+            @as(u64, @intCast(LIGHT_COLOR_LOOKUP_SQUARE_DIM)),
+            @as(u64, @intCast(LIGHT_DEPTH_LOOKUP_SQUARE_DIM)),
         },
     );
     const vertex_code =
@@ -985,9 +990,30 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  return(Result);
         \\}
         \\
-        \\vec4 SampleLighting(vec2 Oct, vec3 Voxel)
+        \\vec4 SampleLighting(vec2 Oct, vec3 VoxelI, vec3 dVoxelI)
         \\{
-        \\  vec4 Result = vec4(1, 1, 1, 1);
+        \\  vec2 OctExteriorUVDim = vec2(
+        \\    1.0 / Square(LIGHT_LOOKUP_VOXEL_DIM),
+        \\    1.0 / LIGHT_LOOKUP_VOXEL_DIM);
+        \\  vec2 OctMapInteriorUVDimC = vec2(
+        \\    (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2) / (Square(LIGHT_LOOKUP_VOXEL_DIM) * LIGHT_COLOR_LOOKUP_SQUARE_DIM),
+        \\    (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2) / (LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM));
+        \\  vec2 OctMapInteriorUVDimD = vec2(
+        \\    (LIGHT_DEPTH_LOOKUP_SQUARE_DIM - 2) / (Square(LIGHT_LOOKUP_VOXEL_DIM) * LIGHT_DEPTH_LOOKUP_SQUARE_DIM),
+        \\    (LIGHT_DEPTH_LOOKUP_SQUARE_DIM - 2) / (LIGHT_LOOKUP_VOXEL_DIM * LIGHT_DEPTH_LOOKUP_SQUARE_DIM));
+        \\
+        \\  vec3 I = (VoxelI + dVoxelI);
+        \\  vec2 OctMapCenterUV = vec2(
+        \\    (LIGHT_LOOKUP_VOXEL_DIM * I.y + I.x) * OctExteriorUVDim.x,
+        \\    I.z * OctExteriorUVDim.y);
+        \\  OctMapCenterUV += 0.5 * OctExteriorUVDim;
+        \\
+        \\  vec2 SampleCUV = OctMapCenterUV + 0.5 * OctMapInteriorUVDimC * Oct;
+        \\  vec2 SampleDUV = OctMapCenterUV + 0.5 * OctMapInteriorUVDimD * Oct;
+        \\
+        \\  vec4 Result;
+        \\  Result.xyz = texture(LightColorSampler, SampleCUV).rgb;
+        \\  Result.a = texture(LightDepthSampler, SampleCUV).r;
         \\
         \\  return(Result);
         \\}
@@ -1010,14 +1036,14 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\    Oct.xy = SignNotZero(R.xy) * (1.0 - abs(Oct.xy));
         \\  }
         \\
-        \\  vec4 S000 = SampleLighting(Oct, VoxelI + vec3(0, 0, 0));
-        \\  vec4 S100 = SampleLighting(Oct, VoxelI + vec3(1, 0, 0));
-        \\  vec4 S010 = SampleLighting(Oct, VoxelI + vec3(0, 1, 0));
-        \\  vec4 S110 = SampleLighting(Oct, VoxelI + vec3(1, 1, 0));
-        \\  vec4 S001 = SampleLighting(Oct, VoxelI + vec3(0, 0, 1));
-        \\  vec4 S101 = SampleLighting(Oct, VoxelI + vec3(1, 0, 1));
-        \\  vec4 S011 = SampleLighting(Oct, VoxelI + vec3(0, 1, 1));
-        \\  vec4 S111 = SampleLighting(Oct, VoxelI + vec3(1, 1, 1));
+        \\  vec4 S000 = SampleLighting(Oct, VoxelI, vec3(0, 0, 0));
+        \\  vec4 S100 = SampleLighting(Oct, VoxelI, vec3(1, 0, 0));
+        \\  vec4 S010 = SampleLighting(Oct, VoxelI, vec3(0, 1, 0));
+        \\  vec4 S110 = SampleLighting(Oct, VoxelI, vec3(1, 1, 0));
+        \\  vec4 S001 = SampleLighting(Oct, VoxelI, vec3(0, 0, 1));
+        \\  vec4 S101 = SampleLighting(Oct, VoxelI, vec3(1, 0, 1));
+        \\  vec4 S011 = SampleLighting(Oct, VoxelI, vec3(0, 1, 1));
+        \\  vec4 S111 = SampleLighting(Oct, VoxelI, vec3(1, 1, 1));
         \\
         \\  vec4 S00 = mix(S000, S001, VoxelRelative.z);
         \\  vec4 S10 = mix(S100, S101, VoxelRelative.z);
@@ -1060,7 +1086,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\#if LIGHTING_DISABLED
         \\#else
         \\    vec3 L = SumLight();
-        \\    SurfaceReflection *= L;
+        \\    SurfaceReflection = L;
         \\#endif
         \\
         \\    SurfaceReflection.rgb = mix(SurfaceReflection.rgb, FogColor.rgb * ModColor.a, FogAmount);
@@ -1908,7 +1934,7 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MIN_FILTER, min_filter);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, GL.GL_TEXTURE_MAG_FILTER, mag_filter);
 
-    const light_sampling: u32 = GL.GL_NEAREST;
+    const light_sampling: u32 = GL.GL_LINEAR;
     gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);
     gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, light_sampling);
     gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, light_sampling);
@@ -1939,7 +1965,7 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     }
 
     {
-        const v_span: f32 = 0.125;
+        const v_span: f32 = 0.03; //0.125;
         const u_span: f32 = v_span / 32.0;
         const uv_span: Vector2 = .new(u_span, v_span);
         const uv_center: Vector2 = .new(0.2375, 0.55);

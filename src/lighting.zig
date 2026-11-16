@@ -1549,6 +1549,19 @@ fn getLightAmount(cell: *LightVoxelCell) f32 {
     return 0;
 }
 
+fn voxelOffset(x: u32, y: u32, z: u32, tx: u32, ty: u32, hot_dimension: u32, oct_dimension: u32) u32 {
+    const result =
+        (z * hot_dimension * hot_dimension * oct_dimension * oct_dimension) +
+        (y * hot_dimension * oct_dimension) +
+        (ty * hot_dimension * hot_dimension * oct_dimension) +
+        (x * oct_dimension) + tx;
+    return result;
+}
+
+fn isInDebugVoxDim(v: u32, hot_dimension: u32) bool {
+    return v >= (hot_dimension / 2 - hot_dimension / 6) and v <= ((hot_dimension / 2) + hot_dimension / 6);
+}
+
 pub fn endLightingComputation(
     solution: *LightingSolution,
     group: *RenderGroup,
@@ -1661,6 +1674,24 @@ pub fn endLightingComputation(
             while (y < hot_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < hot_dimension) : (x += 1) {
+                    const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
+
+                    if (isInDebugVoxDim(x, hot_dimension) and
+                        isInDebugVoxDim(y, hot_dimension) and
+                        isInDebugVoxDim(z, hot_dimension))
+                    {
+                        const box_radius: Vector3 = Vector3.new(1, 1, 1).scaledTo(0.1);
+                        const box_center_position: Vector3 = solution.voxel_min_corner_hot.plus(
+                            voxel_center_position.hadamardProduct(solution.voxel_cell_dimension),
+                        );
+                        pushDebugBox(
+                            solution,
+                            box_center_position.minus(box_radius),
+                            box_center_position.plus(box_radius),
+                            .new(1, 1, 1, 1),
+                        );
+                    }
+
                     var ty: u32 = 1;
                     while (ty < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (ty += 1) {
                         var tx: u32 = 1;
@@ -1673,12 +1704,13 @@ pub fn endLightingComputation(
                                     @as(f32, @floatFromInt(tx - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
                                     @as(f32, @floatFromInt(ty - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
                                 );
-                                o_xy = o_xy.scaledTo(2).minus(.new(1, 1));
+                                o_xy = o_xy.scaledTo(2).minus(.new(1, 1)).plus(
+                                    Vector2.new(1, 1).scaledTo(1.0 / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2))),
+                                );
 
                                 const sample_direction: Vector3 = math.unitVectorFromOctahedral(o_xy);
 
                                 if (true) {
-                                    const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
                                     const voxel_uvw: Vector3 = inverse_hot_dimension.hadamardProduct(voxel_center_position);
 
                                     {
@@ -1702,8 +1734,6 @@ pub fn endLightingComputation(
                                         if (sample_direction.z() > 0) 1 else 0.1,
                                     );
                                 }
-
-                                // light_c = .new(0.5 + 0.5 * o_xy.x(), 0.5 + 0.5 * o_xy.y(), 0);
                             }
 
                             if (TEST_LIGHT_CHECKERBOARD) {
@@ -1728,15 +1758,9 @@ pub fn endLightingComputation(
                             }
 
                             const element_index_color: u32 =
-                                (z * hot_dimension * hot_dimension * oct_color_dimension * oct_color_dimension) +
-                                (y * hot_dimension * oct_color_dimension) +
-                                (ty * hot_dimension * hot_dimension * oct_color_dimension) +
-                                (x * oct_color_dimension) + tx;
+                                voxelOffset(x, y, z, tx, ty, hot_dimension, oct_color_dimension);
                             const element_index_depth: u32 =
-                                (z * hot_dimension * hot_dimension * oct_depth_dimension * oct_depth_dimension) +
-                                (y * hot_dimension * oct_depth_dimension) +
-                                (ty * hot_dimension * hot_dimension * oct_depth_dimension) +
-                                (x * oct_depth_dimension) + tx;
+                                voxelOffset(x, y, z, tx, ty, hot_dimension, oct_depth_dimension);
                             commands.light_voxel_color[element_index_color] = light_c;
                             commands.light_voxel_depth[element_index_depth] = light_d;
                         }
@@ -1746,85 +1770,58 @@ pub fn endLightingComputation(
         }
     }
 
-    if (false) {
-        // TODO: Need to ensure that the hot corner is placed properly.
-        std.debug.assert(solution.hot_corner_i.x() >= 2);
-        std.debug.assert(solution.hot_corner_i.y() >= 2);
-        std.debug.assert(solution.hot_corner_i.z() >= 2);
-
-        std.debug.assert(solution.hot_corner_i.x() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
-        std.debug.assert(solution.hot_corner_i.y() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
-        std.debug.assert(solution.hot_corner_i.z() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
-
+    {
         var z: u32 = 0;
         while (z < hot_dimension) : (z += 1) {
             var y: u32 = 0;
             while (y < hot_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < hot_dimension) : (x += 1) {
-                    var hot_z: u32 = solution.hot_corner_i.z() + z;
-                    var hot_y: u32 = solution.hot_corner_i.y() + y;
-                    var hot_x: u32 = solution.hot_corner_i.x() + x;
-                    const this_cell: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
+                    const n: u32 = LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1;
+                    const row0_start: u32 = voxelOffset(x, y, z, 0, 0, hot_dimension, oct_color_dimension);
+                    const row1_start: u32 = voxelOffset(x, y, z, 0, 1, hot_dimension, oct_color_dimension);
+                    const row_n0_start: u32 = voxelOffset(x, y, z, 0, n, hot_dimension, oct_color_dimension);
+                    const row_n1_start: u32 = voxelOffset(x, y, z, 0, n - 1, hot_dimension, oct_color_dimension);
 
-                    const element_index: u32 = z * hot_dimension * hot_dimension + y * hot_dimension + x;
-                    const light_amount: f32 = getLightAmount(this_cell);
-                    if (light_amount < 0.1) {
-                        var light_weight: f32 = 0;
-                        var light_normal0: Vector3 = .zero();
-                        var light_color0: Color3 = .zero();
-
-                        var dz: i32 = -1;
-                        while (dz <= 1) : (dz += 1) {
-                            var dy: i32 = -1;
-                            while (dy <= 1) : (dy += 1) {
-                                var dx: i32 = -1;
-                                while (dx <= 1) : (dx += 1) {
-                                    hot_z = @intCast(@as(i32, @intCast(solution.hot_corner_i.z() + z)) + dz);
-                                    hot_y = @intCast(@as(i32, @intCast(solution.hot_corner_i.y() + y)) + dy);
-                                    hot_x = @intCast(@as(i32, @intCast(solution.hot_corner_i.x() + x)) + dx);
-                                    const cell0: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
-
-                                    hot_z = @intCast(@as(i32, @intCast(solution.hot_corner_i.z() + z)) + 2 * dz);
-                                    hot_y = @intCast(@as(i32, @intCast(solution.hot_corner_i.y() + y)) + 2 * dy);
-                                    hot_x = @intCast(@as(i32, @intCast(solution.hot_corner_i.x() + x)) + 2 * dx);
-                                    const cell1: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
-
-                                    const n_light_amount: f32 = getLightAmount(cell0) + getLightAmount(cell1);
-                                    light_weight += n_light_amount;
-                                    light_normal0 = light_normal0.plus(
-                                        cell0.light_normal[0].scaledTo(2).minus(cell1.light_normal[0]).scaledTo(n_light_amount),
-                                    );
-                                    light_color0 = light_color0.plus(
-                                        cell0.light_color[0].scaledTo(2).minus(cell1.light_color[0]).scaledTo(n_light_amount),
-                                    );
-                                }
-                            }
-                        }
-
-                        light_color0 = light_color0.scaledTo(math.safeRatio0(1, light_weight));
-                        light_normal0 = light_normal0.normalizeOrZero();
-
-                        const light_blend: f32 = 0.1 - light_amount;
-                        commands.light_voxel_normal[0][element_index] =
-                            commands.light_voxel_normal[0][element_index].plus(light_normal0.scaledTo(light_blend));
-                        commands.light_voxel_color[0][element_index] =
-                            commands.light_voxel_color[0][element_index].plus(light_color0.scaledTo(light_blend));
-
-                        if (false) {
-                            if (light_weight == 0) {
-                                commands.light_voxel_normal[0][element_index] = .new(0, 0, 1);
-                                commands.light_voxel_color[0][element_index] = .new(1, 0, 1);
-                            }
-                        }
-                    } else {
-                        // commands.light_voxel_normal[0][element_index] = .new(0, 0, 1);
-                        // commands.light_voxel_color[0][element_index] = .new(1, 1, 0);
+                    var tx: u32 = 1;
+                    while (tx < n) : (tx += 1) {
+                        commands.light_voxel_color[row0_start + tx] = commands.light_voxel_color[row1_start + n - tx];
+                        commands.light_voxel_color[row_n0_start + tx] = commands.light_voxel_color[row_n1_start + n - tx];
                     }
+
+                    var ty: u32 = 1;
+                    while (ty < n) : (ty += 1) {
+                        const col0_start: u32 = voxelOffset(x, y, z, 0, ty, hot_dimension, oct_color_dimension);
+                        const col1_start: u32 = voxelOffset(x, y, z, 1, n - ty, hot_dimension, oct_color_dimension);
+                        const col_n0_start: u32 = voxelOffset(x, y, z, n, ty, hot_dimension, oct_color_dimension);
+                        const col_n1_start: u32 = voxelOffset(x, y, z, n - 1, n - ty, hot_dimension, oct_color_dimension);
+                        commands.light_voxel_color[col0_start] = commands.light_voxel_color[col1_start];
+                        commands.light_voxel_color[col_n0_start] = commands.light_voxel_color[col_n1_start];
+                    }
+
+                    commands.light_voxel_color[voxelOffset(x, y, z, 0, 0, hot_dimension, oct_color_dimension)] =
+                        commands.light_voxel_color[voxelOffset(x, y, z, n - 1, n - 1, hot_dimension, oct_color_dimension)];
+
+                    commands.light_voxel_color[voxelOffset(x, y, z, n, 0, hot_dimension, oct_color_dimension)] =
+                        commands.light_voxel_color[voxelOffset(x, y, z, 1, n - 1, hot_dimension, oct_color_dimension)];
+
+                    commands.light_voxel_color[voxelOffset(x, y, z, 0, n, hot_dimension, oct_color_dimension)] =
+                        commands.light_voxel_color[voxelOffset(x, y, z, n - 1, 1, hot_dimension, oct_color_dimension)];
+
+                    commands.light_voxel_color[voxelOffset(x, y, z, n, n, hot_dimension, oct_color_dimension)] =
+                        commands.light_voxel_color[voxelOffset(x, y, z, 1, 1, hot_dimension, oct_color_dimension)];
                 }
             }
         }
     }
+
+    std.debug.assert(solution.hot_corner_i.x() >= 2);
+    std.debug.assert(solution.hot_corner_i.y() >= 2);
+    std.debug.assert(solution.hot_corner_i.z() >= 2);
+
+    std.debug.assert(solution.hot_corner_i.x() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
+    std.debug.assert(solution.hot_corner_i.y() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
+    std.debug.assert(solution.hot_corner_i.z() < (LIGHT_LARGE_VOXEL_DIM - LIGHT_LOOKUP_VOXEL_DIM - 2));
 
     _ = group.getCurrentQuads(solution.debug_line_count, group.white_texture);
     const white_texture: RendererTexture = group.white_texture;
