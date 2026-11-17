@@ -112,12 +112,12 @@ pub const LightingSolution = struct {
     update_debug_lines: bool,
     debug_probe_index: u32,
     debug_line_count: u32,
-    debug_lines: [65535]DebugLine = undefined,
+    debug_lines: [65536]DebugLine = undefined,
 
     irradiance_blend_u: f32,
     irradiance_blend_v: f32,
 
-    accumulation_count: f32 = 0,
+    accumulation_count: u32 = 0,
     accumulating: bool = false,
 
     sampling_spheres: [*]LightSamplingSphere,
@@ -256,7 +256,6 @@ fn raycast(
     var t_ray: F32_4x = @splat(std.math.floatMax(f32));
     const zero: F32_4x = @splat(0);
     const one: F32_4x = @splat(1);
-    const one_u: U32_4x = @splat(1);
     const t_close_enough: F32_4x = @splat(15);
 
     const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(one)).dividedBy(ray_direction);
@@ -342,16 +341,23 @@ fn raycast(
     const unscaled_direction: V3_4x = hit_position.minus(hit_box_center);
     const scaled_direction: V3_4x = hit_box_inv_radius.hadamardProduct(unscaled_direction);
 
-    const x_mask: U32_4x =
-        @intFromBool((scaled_direction.x < scaled_direction.y) & (scaled_direction.x < scaled_direction.z));
-    const y_mask: U32_4x =
-        @intFromBool((scaled_direction.y < scaled_direction.x) & (scaled_direction.y < scaled_direction.z));
-    const z_mask: U32_4x =
-        @intFromBool((scaled_direction.z < scaled_direction.x) & (scaled_direction.z < scaled_direction.y));
+    const x_mask: Bool_4x = (scaled_direction.x < scaled_direction.y) & (scaled_direction.x < scaled_direction.z);
+    const y_mask: Bool_4x = (scaled_direction.y < scaled_direction.x) & (scaled_direction.y < scaled_direction.z);
+    const z_mask: Bool_4x = (scaled_direction.z < scaled_direction.x) & (scaled_direction.z < scaled_direction.y);
+
+    const one_bits: U32_4x = @splat(0x3F800000);
+    const sign_bits: U32_4x = @splat(0x80000000);
+
+    const signed_x: F32_4x = @bitCast(one_bits | (@as(U32_4x, @bitCast(scaled_direction.x)) & sign_bits));
+    const signed_y: F32_4x = @bitCast(one_bits | (@as(U32_4x, @bitCast(scaled_direction.y)) & sign_bits));
+    const signed_z: F32_4x = @bitCast(one_bits | (@as(U32_4x, @bitCast(scaled_direction.z)) & sign_bits));
+
+    const zero_f: F32_4x = @splat(0.0);
+
     const hit_normal: V3_4x = .fromAxes(
-        @floatFromInt(x_mask & (one_u | simd.signBitFrom(scaled_direction.x))),
-        @floatFromInt(y_mask & (one_u | simd.signBitFrom(scaled_direction.y))),
-        @floatFromInt(z_mask & (one_u | simd.signBitFrom(scaled_direction.z))),
+        @select(f32, x_mask, signed_x, zero_f),
+        @select(f32, y_mask, signed_y, zero_f),
+        @select(f32, z_mask, signed_z, zero_f),
     );
 
     var result: RaycastResult = .{};
@@ -576,7 +582,7 @@ fn computeVoxelIrradianceAt(
         },
         .{
             .{
-                lookupVoxelClamped(solution, voxel_index.x(), voxel_index.y(), voxel_index.z()),
+                lookupVoxelClamped(solution, voxel_index.x(), voxel_index.y(), voxel_index.z() + 1),
                 lookupVoxelClamped(solution, voxel_index.x() + 1, voxel_index.y(), voxel_index.z() + 1),
             },
             .{
@@ -984,7 +990,7 @@ fn irradiancePack(light_intensity_in: Color3) u32 {
             inverse_max_value * light_intensity.g(),
             inverse_max_value * light_intensity.b(),
             alpha,
-        ).scaledTo(255).packColorBGRA();
+        ).scaledTo(65535).packColorBGRA();
     }
 
     return result;
@@ -1127,9 +1133,9 @@ pub fn beginLightingComputation(
         const center_moved: bool = !world_mod.areInSameChunk(world, &solution.last_origin_position, &origin_position);
         if (center_moved) {
             const voxel_cells_per_chunk: Vector3i = .new(
-                @intFromFloat(world.chunk_dimension_in_meters.x() / solution.voxel_cell_dimension.x()),
-                @intFromFloat(world.chunk_dimension_in_meters.y() / solution.voxel_cell_dimension.y()),
-                @intFromFloat(world.chunk_dimension_in_meters.z() / solution.voxel_cell_dimension.z()),
+                intrinsics.roundReal32ToInt32(world.chunk_dimension_in_meters.x() / solution.voxel_cell_dimension.x()),
+                intrinsics.roundReal32ToInt32(world.chunk_dimension_in_meters.y() / solution.voxel_cell_dimension.y()),
+                intrinsics.roundReal32ToInt32(world.chunk_dimension_in_meters.z() / solution.voxel_cell_dimension.z()),
             );
 
             const delta_chunk: Vector3i = .new(
@@ -1390,14 +1396,14 @@ fn spamVoxel(
     if (true) {
         var dx: i32 = -1;
         while (dx <= 1) : (dx += 1) {
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z() - 1),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
+            // spamVoxelSlice(
+            //     solution,
+            //     .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z() - 1),
+            //     light_position,
+            //     light_color,
+            //     light_falloff,
+            //     is_test_cast,
+            // );
             spamVoxelSlice(
                 solution,
                 .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z()),
@@ -1704,9 +1710,7 @@ pub fn endLightingComputation(
                                     @as(f32, @floatFromInt(tx - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
                                     @as(f32, @floatFromInt(ty - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
                                 );
-                                o_xy = o_xy.scaledTo(2).minus(.new(1, 1)).plus(
-                                    Vector2.new(1, 1).scaledTo(1.0 / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2))),
-                                );
+                                o_xy = o_xy.scaledTo(2).minus(.new(1, 1));
 
                                 const sample_direction: Vector3 = math.unitVectorFromOctahedral(o_xy);
 

@@ -750,8 +750,8 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
             GL.GL_TEXTURE_2D,
             0,
             GL_R32F,
-            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
-            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_LOOKUP_VOXEL_DIM * LIGHT_DEPTH_LOOKUP_SQUARE_DIM,
+            LIGHT_LOOKUP_VOXEL_DIM * LIGHT_DEPTH_LOOKUP_SQUARE_DIM,
             0,
             GL.GL_RED,
             GL.GL_FLOAT,
@@ -965,10 +965,10 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         // \\    LightColor.g *= sign(LightV.g);
         // \\    LightColor.b *= sign(LightV.b);
         \\
-        \\    LightColor.r - max(LightColor.r, 0);
-        \\    LightColor.g - max(LightColor.g, 0);
-        \\    LightColor.b - max(LightColor.b, 0);
-        \\    Result = LightDirectionCoefficient * (DiffuseCoefficient * LightDirectionCoefficient * LightColor +
+        \\    LightColor.r = max(LightColor.r, 0.0);
+        \\    LightColor.g = max(LightColor.g, 0.0);
+        \\    LightColor.b = max(LightColor.b, 0.0);
+        \\    Result = LightDirectionCoefficient * (DiffuseCoefficient * LightColor +
         \\             SpecularCoefficient * ReflectionCoefficient * LightColor);
         \\  }
         \\
@@ -996,11 +996,11 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\    1.0 / Square(LIGHT_LOOKUP_VOXEL_DIM),
         \\    1.0 / LIGHT_LOOKUP_VOXEL_DIM);
         \\  vec2 OctMapInteriorUVDimC = vec2(
-        \\    (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2) / (Square(LIGHT_LOOKUP_VOXEL_DIM) * LIGHT_COLOR_LOOKUP_SQUARE_DIM),
-        \\    (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2) / (LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM));
+        \\    (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2.0) / (Square(LIGHT_LOOKUP_VOXEL_DIM) * LIGHT_COLOR_LOOKUP_SQUARE_DIM),
+        \\    (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2.0) / (LIGHT_LOOKUP_VOXEL_DIM * LIGHT_COLOR_LOOKUP_SQUARE_DIM));
         \\  vec2 OctMapInteriorUVDimD = vec2(
-        \\    (LIGHT_DEPTH_LOOKUP_SQUARE_DIM - 2) / (Square(LIGHT_LOOKUP_VOXEL_DIM) * LIGHT_DEPTH_LOOKUP_SQUARE_DIM),
-        \\    (LIGHT_DEPTH_LOOKUP_SQUARE_DIM - 2) / (LIGHT_LOOKUP_VOXEL_DIM * LIGHT_DEPTH_LOOKUP_SQUARE_DIM));
+        \\    (LIGHT_DEPTH_LOOKUP_SQUARE_DIM - 2.0) / (Square(LIGHT_LOOKUP_VOXEL_DIM) * LIGHT_DEPTH_LOOKUP_SQUARE_DIM),
+        \\    (LIGHT_DEPTH_LOOKUP_SQUARE_DIM - 2.0) / (LIGHT_LOOKUP_VOXEL_DIM * LIGHT_DEPTH_LOOKUP_SQUARE_DIM));
         \\
         \\  vec3 I = (VoxelI + dVoxelI);
         \\  vec2 OctMapCenterUV = vec2(
@@ -1013,7 +1013,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\  vec4 Result;
         \\  Result.xyz = texture(LightColorSampler, SampleCUV).rgb;
-        \\  Result.a = texture(LightDepthSampler, SampleCUV).r;
+        \\  Result.a = texture(LightDepthSampler, SampleDUV).r;
         \\
         \\  return(Result);
         \\}
@@ -1033,7 +1033,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  vec2 Oct = (1.0 / OneNorm) * R.xy;
         \\  if (R.z < 0)
         \\  {
-        \\    Oct.xy = SignNotZero(R.xy) * (1.0 - abs(Oct.xy));
+        \\    Oct.xy = SignNotZero(R.xy) * (1.0 - abs(Oct.yx));
         \\  }
         \\
         \\  vec4 S000 = SampleLighting(Oct, VoxelI, vec3(0, 0, 0));

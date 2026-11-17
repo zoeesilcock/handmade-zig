@@ -1873,8 +1873,10 @@ pub fn octahedralFromUnitVector(v: Vector3) Vector2 {
     const one_norm: f32 = @abs(v.x()) + @abs(v.y()) + @abs(v.z());
     var result: Vector2 = v.xy().scaledTo(1 / one_norm);
     if (v.z() < 0) {
-        _ = result.setX(intrinsics.signOf(result.x()) * (1 - @abs(result.y())));
-        _ = result.setY(intrinsics.signOf(result.y()) * (1 - @abs(result.x())));
+        const ox = intrinsics.signOf(result.x()) * (1 - @abs(result.y()));
+        const oy = intrinsics.signOf(result.y()) * (1 - @abs(result.x()));
+        _ = result.setX(ox);
+        _ = result.setY(oy);
     }
     return result;
 }
@@ -1889,7 +1891,7 @@ pub fn unitVectorFromOctahedral(o: Vector2) Vector3 {
         oy = intrinsics.signOfF32(o.y()) * (1 - @abs(o.x()));
     }
 
-    var result: Vector3 = .new(o.x(), o.y(), oz);
+    var result: Vector3 = .new(ox, oy, oz);
     result = result.normalized();
 
     return result;
