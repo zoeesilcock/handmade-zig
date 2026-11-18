@@ -183,7 +183,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
         const basis_position: Vector3 = position;
         _ = position.setX(position.x() + 0);
         _ = position.setY(position.y() + 0);
-        _ = position.setZ(position.z() + 0.5 * grid.series.randomUnilateral());
+        // _ = position.setZ(position.z() + 0.5 * grid.series.randomUnilateral());
 
         color = .newFromSRGB(0.8, 0.8, 0.8, 1);
         var piece: *EntityVisiblePiece = entity_gen.addPieceV3(

@@ -82,6 +82,7 @@ pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
 const TEST_LIGHT_SPHERE = true;
 const TEST_LIGHT_CHECKERBOARD = false;
 const TEST_LIGHT_TRANSFER = false;
+const TEST_EDGE_COLORING = true;
 
 const SLOW = shared.SLOW;
 
@@ -1789,8 +1790,16 @@ pub fn endLightingComputation(
 
                     var tx: u32 = 1;
                     while (tx < n) : (tx += 1) {
-                        commands.light_voxel_color[row0_start + tx] = commands.light_voxel_color[row1_start + n - tx];
-                        commands.light_voxel_color[row_n0_start + tx] = commands.light_voxel_color[row_n1_start + n - tx];
+                        var c0: Color3 = commands.light_voxel_color[row1_start + n - tx];
+                        var c1: Color3 = commands.light_voxel_color[row_n1_start + n - tx];
+
+                        if (TEST_EDGE_COLORING) {
+                            c0 = .new(1, 0, 0);
+                            c1 = .new(0, 1, 0);
+                        }
+
+                        commands.light_voxel_color[row0_start + tx] = c0;
+                        commands.light_voxel_color[row_n0_start + tx] = c1;
                     }
 
                     var ty: u32 = 1;
@@ -1799,8 +1808,16 @@ pub fn endLightingComputation(
                         const col1_start: u32 = voxelOffset(x, y, z, 1, n - ty, hot_dimension, oct_color_dimension);
                         const col_n0_start: u32 = voxelOffset(x, y, z, n, ty, hot_dimension, oct_color_dimension);
                         const col_n1_start: u32 = voxelOffset(x, y, z, n - 1, n - ty, hot_dimension, oct_color_dimension);
-                        commands.light_voxel_color[col0_start] = commands.light_voxel_color[col1_start];
-                        commands.light_voxel_color[col_n0_start] = commands.light_voxel_color[col_n1_start];
+                        var c0: Color3 = commands.light_voxel_color[col1_start];
+                        var c1: Color3 = commands.light_voxel_color[col_n1_start];
+
+                        if (TEST_EDGE_COLORING) {
+                            c0 = .new(1, 1, 0);
+                            c1 = .new(0, 1, 1);
+                        }
+
+                        commands.light_voxel_color[col0_start] = c0;
+                        commands.light_voxel_color[col_n0_start] = c1;
                     }
 
                     commands.light_voxel_color[voxelOffset(x, y, z, 0, 0, hot_dimension, oct_color_dimension)] =
@@ -1814,6 +1831,18 @@ pub fn endLightingComputation(
 
                     commands.light_voxel_color[voxelOffset(x, y, z, n, n, hot_dimension, oct_color_dimension)] =
                         commands.light_voxel_color[voxelOffset(x, y, z, 1, 1, hot_dimension, oct_color_dimension)];
+
+                    if (false) {
+                        commands.light_voxel_color[voxelOffset(x, y, z, 3, 3, hot_dimension, oct_color_dimension)] = .new(1, 0, 0);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 4, 3, hot_dimension, oct_color_dimension)] = .new(0, 1, 0);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 5, 3, hot_dimension, oct_color_dimension)] = .new(0, 0, 1);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 3, 4, hot_dimension, oct_color_dimension)] = .new(1, 1, 0);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 4, 4, hot_dimension, oct_color_dimension)] = .new(0, 0, 0);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 5, 4, hot_dimension, oct_color_dimension)] = .new(1, 0, 1);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 3, 5, hot_dimension, oct_color_dimension)] = .new(0.5, 1, 0);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 4, 5, hot_dimension, oct_color_dimension)] = .new(1, 0.5, 1);
+                        commands.light_voxel_color[voxelOffset(x, y, z, 5, 5, hot_dimension, oct_color_dimension)] = .new(0, 0.5, 1);
+                    }
                 }
             }
         }

@@ -1012,7 +1012,41 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  vec2 SampleDUV = OctMapCenterUV + 0.5 * OctMapInteriorUVDimD * Oct;
         \\
         \\  vec4 Result;
+        \\
+        \\#if 1
+        \\  vec2 T = SampleCUV * vec2(textureSize(LightColorSampler, 0)) - vec2(0.5, 0.5);
+        \\  ivec2 Ti = ivec2(floor(T));
+        \\
+        \\  float u = T.x - float(Ti.x);
+        \\  float v = T.y - float(Ti.y);
+        \\
+        \\  vec3 T00 = texelFetch(LightColorSampler, Ti, 0).rgb;
+        \\  vec3 T01 = texelFetch(LightColorSampler, Ti + ivec2(0, 1), 0).rgb;
+        \\  vec3 T10 = texelFetch(LightColorSampler, Ti + ivec2(1, 0), 0).rgb;
+        \\  vec3 T11 = texelFetch(LightColorSampler, Ti + ivec2(1, 1), 0).rgb;
+        \\#if 1
+        \\  float c00 = 1 - clamp(Square(u) + Square(v), 0.0, 1.0);
+        \\  float c01 = 1 - clamp(Square(u) + Square(1.0 - v), 0.0, 1.0);
+        \\  float c10 = 1 - clamp(Square(1.0 - u) + Square(v), 0.0, 1.0);
+        \\  float c11 = 1 - clamp(Square(1.0 - u) + Square(1.0 - v), 0.0, 1.0);
+        \\
+        \\  float dn = 1.0 / (c00 + c01 + c10 + c11);
+        \\
+        \\  c00 *= dn;
+        \\  c01 *= dn;
+        \\  c10 *= dn;
+        \\  c11 *= dn;
+        \\#else
+        \\  float c00 = (1 - u) * (1 - v);
+        \\  float c01 = (1 - u) * v;
+        \\  float c10 = u * (1 - v);
+        \\  float c11 = u * v;
+        \\#endif
+        \\
+        \\  Result.xyz = c00 * T00 + c01 * T01 + c10 * T10 + c11 * T11;
+        \\#else
         \\  Result.xyz = texture(LightColorSampler, SampleCUV).rgb;
+        \\#endif
         \\  Result.a = texture(LightDepthSampler, SampleDUV).r;
         \\
         \\  return(Result);
@@ -1086,7 +1120,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\#if LIGHTING_DISABLED
         \\#else
         \\    vec3 L = SumLight();
-        \\    SurfaceReflection = L;
+        \\    SurfaceReflection *= L;
         \\#endif
         \\
         \\    SurfaceReflection.rgb = mix(SurfaceReflection.rgb, FogColor.rgb * ModColor.a, FogAmount);
@@ -1807,117 +1841,6 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
         }
     }
 
-    // var texture_width: i32 =
-    //     (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_width)).index)));
-    // var texture_height: i32 =
-    //     (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_height)).index)));
-
-    // open_gl.light_buffer_count = 0;
-    // light_index = 0;
-    // while (texture_width > 1 and texture_height > 1) : (light_index += 1) {
-    //     const light_buffer: *LightBuffer = &open_gl.light_buffers[open_gl.light_buffer_count];
-    //     open_gl.light_buffer_count += 1;
-    //     const filter_type: i32 = GL.GL_LINEAR;
-    //
-    //     light_buffer.width = texture_width;
-    //     light_buffer.height = texture_height;
-    //
-    //     light_buffer.front_emission_texture = framebufferTexImage(
-    //         open_gl,
-    //         GL.GL_TEXTURE_2D,
-    //         GL_RGB32F,
-    //         filter_type,
-    //         texture_width,
-    //         texture_height,
-    //     );
-    //     light_buffer.back_emission_texture = framebufferTexImage(
-    //         open_gl,
-    //         GL.GL_TEXTURE_2D,
-    //         GL_RGB32F,
-    //         filter_type,
-    //         texture_width,
-    //         texture_height,
-    //     );
-    //     light_buffer.surface_color_texture = framebufferTexImage(
-    //         open_gl,
-    //         GL.GL_TEXTURE_2D,
-    //         GL_RGB32F,
-    //         filter_type,
-    //         texture_width,
-    //         texture_height,
-    //     );
-    //     light_buffer.normal_position_texture = framebufferTexImage(
-    //         open_gl,
-    //         GL.GL_TEXTURE_2D,
-    //         GL_RGB32F,
-    //         filter_type,
-    //         texture_width,
-    //         texture_height,
-    //     );
-    //
-    //     // Up framebuffer.
-    //     open_gl.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
-    //     open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_all_framebuffer);
-    //     open_gl.optGLFrameBufferTexture2DEXT.?(
-    //         GL_FRAMEBUFFER,
-    //         GL_COLOR_ATTACHMENT0,
-    //         GL.GL_TEXTURE_2D,
-    //         light_buffer.front_emission_texture,
-    //         0,
-    //     );
-    //     open_gl.optGLFrameBufferTexture2DEXT.?(
-    //         GL_FRAMEBUFFER,
-    //         GL_COLOR_ATTACHMENT1,
-    //         GL.GL_TEXTURE_2D,
-    //         light_buffer.back_emission_texture,
-    //         0,
-    //     );
-    //     open_gl.optGLFrameBufferTexture2DEXT.?(
-    //         GL_FRAMEBUFFER,
-    //         GL_COLOR_ATTACHMENT2,
-    //         GL.GL_TEXTURE_2D,
-    //         light_buffer.surface_color_texture,
-    //         0,
-    //     );
-    //     open_gl.optGLFrameBufferTexture2DEXT.?(
-    //         GL_FRAMEBUFFER,
-    //         GL_COLOR_ATTACHMENT3,
-    //         GL.GL_TEXTURE_2D,
-    //         light_buffer.normal_position_texture,
-    //         0,
-    //     );
-    //     open_gl.optGLDrawBuffers.?(4, @ptrCast(&ALL_COLOR_ATTACHMENTS));
-    //
-    //     // Down framebuffer.
-    //     open_gl.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
-    //     open_gl.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_emission_framebuffer);
-    //     open_gl.optGLFrameBufferTexture2DEXT.?(
-    //         GL_FRAMEBUFFER,
-    //         GL_COLOR_ATTACHMENT0,
-    //         GL.GL_TEXTURE_2D,
-    //         light_buffer.front_emission_texture,
-    //         0,
-    //     );
-    //     open_gl.optGLFrameBufferTexture2DEXT.?(
-    //         GL_FRAMEBUFFER,
-    //         GL_COLOR_ATTACHMENT1,
-    //         GL.GL_TEXTURE_2D,
-    //         light_buffer.back_emission_texture,
-    //         0,
-    //     );
-    //     open_gl.optGLDrawBuffers.?(2, @ptrCast(&ALL_COLOR_ATTACHMENTS));
-    //
-    //     texture_width = @divFloor(texture_width + 1, 2);
-    //     texture_height = @divFloor(texture_height + 1, 2);
-    //
-    //     if (texture_width < 1) {
-    //         texture_width = 1;
-    //     }
-    //     if (texture_height < 1) {
-    //         texture_height = 1;
-    //     }
-    // }
-
     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
     var min_filter: i32 = GL.GL_LINEAR_MIPMAP_NEAREST;
     var mag_filter: i32 = GL.GL_LINEAR;
@@ -1965,10 +1888,10 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     }
 
     {
-        const v_span: f32 = 0.03; //0.125;
+        const v_span: f32 = 0.5 * 0.125;
         const u_span: f32 = v_span / 32.0;
         const uv_span: Vector2 = .new(u_span, v_span);
-        const uv_center: Vector2 = .new(0.2375, 0.55);
+        const uv_center: Vector2 = .new(0.615, 0.55);
         const uv_min: Vector2 = uv_center.minus(uv_span);
         const uv_max: Vector2 = uv_center.plus(uv_span);
         const top_y: f32 = 0;
