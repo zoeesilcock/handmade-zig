@@ -540,6 +540,22 @@ fn Color3Type(comptime ScalarType: type) type {
             } };
         }
 
+        pub fn fromV3u(self: Vector3u) Color3 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+                @floatFromInt(self.z()),
+            );
+        }
+
+        pub fn fromV3i(self: Vector3i) Color3 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+                @floatFromInt(self.z()),
+            );
+        }
+
         pub fn r(self: *const Self) ScalarType {
             return self.values[0];
         }
@@ -1873,8 +1889,8 @@ pub fn octahedralFromUnitVector(v: Vector3) Vector2 {
     const one_norm: f32 = @abs(v.x()) + @abs(v.y()) + @abs(v.z());
     var result: Vector2 = v.xy().scaledTo(1 / one_norm);
     if (v.z() < 0) {
-        const ox = intrinsics.signOf(result.x()) * (1 - @abs(result.y()));
-        const oy = intrinsics.signOf(result.y()) * (1 - @abs(result.x()));
+        const ox = intrinsics.signOfF32(result.x()) * (1 - @abs(result.y()));
+        const oy = intrinsics.signOfF32(result.y()) * (1 - @abs(result.x()));
         _ = result.setX(ox);
         _ = result.setY(oy);
     }

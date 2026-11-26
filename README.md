@@ -131,3 +131,4 @@ llvm-mca .\zig-out\bin\handmade-dll.asm -bottleneck-analysis -o .\zig-out\bin\ha
 
 ### Lighting
 * https://jcgt.org/published/0008/02/01/
+* https://casual-effects.com/research/McGuire2017LightField/McGuire2017LightField.pdf

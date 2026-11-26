@@ -2425,17 +2425,20 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
     useProgramEnd(open_gl, &open_gl.final_stretch);
 
-    open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.light_map_debug_buffer);
-    useProgramBegin(open_gl, &open_gl.final_stretch);
-    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);
-    open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
+    if (false) {
+        open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.light_map_debug_buffer);
+        useProgramBegin(open_gl, &open_gl.final_stretch);
+        gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);
+        open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
 
-    gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_depth_atlas_handle);
-    open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 4, 4);
+        gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_depth_atlas_handle);
+        open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 4, 4);
+
+        useProgramEnd(open_gl, &open_gl.final_stretch);
+    }
 
     gl.glBindTexture(GL.GL_TEXTURE_2D, 0);
     open_gl.optGLActiveTexture.?(GL_TEXTURE0);
-    useProgramEnd(open_gl, &open_gl.final_stretch);
 }
 
 fn drawLineVertices(

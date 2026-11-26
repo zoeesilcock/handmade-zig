@@ -29,6 +29,7 @@ var global_config = &@import("config.zig").global_config;
 
 // Types.
 const Vector2 = math.Vector2;
+const Vector2u = math.Vector2u;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Vector3i = math.Vector3i;
@@ -81,8 +82,8 @@ pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
 
 const TEST_LIGHT_SPHERE = true;
 const TEST_LIGHT_CHECKERBOARD = false;
-const TEST_LIGHT_TRANSFER = false;
-const TEST_EDGE_COLORING = true;
+const TEST_LIGHT_TRANSFER = true;
+const TEST_EDGE_COLORING = false;
 
 const SLOW = shared.SLOW;
 
@@ -115,8 +116,7 @@ pub const LightingSolution = struct {
     debug_line_count: u32,
     debug_lines: [65536]DebugLine = undefined,
 
-    irradiance_blend_u: f32,
-    irradiance_blend_v: f32,
+    t_update_blend: f32,
 
     accumulation_count: u32 = 0,
     accumulating: bool = false,
@@ -164,10 +164,6 @@ const LightNode = struct {
 const LightVoxelCell = struct {
     light_color: [LIGHT_COLOR_LOOKUP_SQUARE_DIM][LIGHT_COLOR_LOOKUP_SQUARE_DIM]Color3 = @splat(@splat(.zero())),
     light_depth: [LIGHT_COLOR_LOOKUP_SQUARE_DIM][LIGHT_COLOR_LOOKUP_SQUARE_DIM]f32 = @splat(@splat(0)),
-
-    total_weight: f32 = 0,
-    light_color_accumulator: [LIGHT_COLOR_LOOKUP_SQUARE_DIM][LIGHT_COLOR_LOOKUP_SQUARE_DIM]Color3 = @splat(@splat(.zero())),
-    light_depth_accumulator: [LIGHT_COLOR_LOOKUP_SQUARE_DIM][LIGHT_COLOR_LOOKUP_SQUARE_DIM]f32 = @splat(@splat(0)),
 };
 
 const DebugLine = extern struct {
@@ -593,21 +589,20 @@ fn computeVoxelIrradianceAt(
         },
     };
 
-    _ = cells;
-    _ = uvw;
-    _ = incidence;
-    _ = sample_normal;
-    // const light_color0 = triLerp(Color3, "light_color", ty, tx, cells, uvw);
-    // const light_depth0 = triLerp(f32, "light_depth", ty, tx, cells, uvw);
-    //
-    // const R: Vector3 =
-    //     incidence.minus(sample_normal.scaledTo(incidence.dotProduct(sample_normal) * 2)).normalizeOrZero();
-    // var result: Color3 = getIrradiance(light_color0, light_normal0, R, sample_normal);
-    // result = result.plus(getIrradiance(light_color1, light_normal1, R, sample_normal));
-    // result = result.plus(getIrradiance(light_color2, light_normal2, R, sample_normal));
-    // result = result.plus(getIrradiance(light_color3, light_normal3, R, sample_normal));
+    const direction: Vector3 =
+        incidence.minus(sample_normal.scaledTo(incidence.dotProduct(sample_normal) * 2)).normalizeOrZero();
+    const t: Vector2u = getOctahedralOffset(direction);
+    const tx = t.x();
+    const ty = t.y();
 
-    const result: Vector3 = .zero();
+    const result: Color3 = cells[0][0][0].light_color[ty][tx].lerp(cells[0][0][1].light_color[ty][tx], uvw.x()).lerp(
+        cells[0][1][0].light_color[ty][tx].lerp(cells[0][1][1].light_color[ty][tx], uvw.x()),
+        uvw.y(),
+    ).lerp(cells[1][0][0].light_color[ty][tx].lerp(cells[1][0][1].light_color[ty][tx], uvw.x()).lerp(
+        cells[1][1][0].light_color[ty][tx].lerp(cells[1][1][1].light_color[ty][tx], uvw.x()),
+        uvw.y(),
+    ), uvw.z());
+
     return result;
 }
 
@@ -645,7 +640,7 @@ pub fn computeLightPropagationWork(queue: shared.PlatformWorkQueuePtr, data: *an
         const direction_sample_index: u32 = light_probe_index + sample_point_entropy & LIGHT_SAMPLING_SPHERE_MASK;
         const sampling_sphere: *LightSamplingSphere = &solution.sampling_spheres[direction_sample_index];
         const ray_bundle_count: u32 = sampling_sphere.sample_direction.len;
-        const ray_weight: f32 = 1 / (@as(f32, @floatFromInt(ray_bundle_count)) * 4);
+        // const ray_weight: f32 = 1 / (@as(f32, @floatFromInt(ray_bundle_count)) * 4);
 
         // const n_closest_lights: [8]*LightingBox = undefined;
         //findClosestLights(&n_closest_lights);
@@ -655,11 +650,6 @@ pub fn computeLightPropagationWork(queue: shared.PlatformWorkQueuePtr, data: *an
         // TODO: Actually pick four random points on the light volume.
         const point_on_light: V3_4x = .fromVector3(bias_towards_light.position);
         var ray_direction: V3_4x = point_on_light.minus(ray_origin).approxNormalizeOrZero();
-
-        var light_position: Vector3 = .new(0, 0, 0);
-        var light_color: Color3 = .new(0, 0, 0);
-        var light_falloff: f32 = 0;
-        var total_power: f32 = 0;
 
         var ray_bundle_index: u32 = 0;
         // TODO: Add padding and increase by one to account for the extra slot used by the light bias.
@@ -717,29 +707,20 @@ pub fn computeLightPropagationWork(queue: shared.PlatformWorkQueuePtr, data: *an
                     this_light_falloff = 0;
                 }
 
-                const this_power: f32 = transfer_pps.r() + transfer_pps.g() + transfer_pps.b();
-                light_position = light_position.plus(probe_sample_position.scaledTo(this_power));
-                light_color = light_color.plus(transfer_pps);
-                light_falloff += this_power * this_light_falloff;
-                total_power += this_power;
+                const oct_offset = getOctahedralOffset(emission_direction.negated());
+                const light_distance: f32 = @as([4]f32, ray.t_ray)[sub_ray];
+                spamVoxel(
+                    solution,
+                    light_probe_position,
+                    transfer_pps,
+                    light_distance,
+                    oct_offset,
+                    false,
+                );
             }
 
             ray_direction = sampling_sphere.sample_direction[ray_bundle_index];
         }
-
-        const power_coefficient: f32 = math.safeRatio0(1, total_power);
-        light_position = light_position.scaledTo(power_coefficient);
-        light_color = light_color.scaledTo(ray_weight);
-        light_falloff *= power_coefficient;
-
-        spamVoxel(
-            solution,
-            light_probe_position,
-            light_position,
-            light_color,
-            light_falloff,
-            false,
-        );
     }
 
     solution.series = series;
@@ -1189,124 +1170,6 @@ pub fn beginLightingComputation(
     }
 }
 
-fn frumbledyGok(
-    solution: *LightingSolution,
-) void {
-    const large_dimension: u32 = LIGHT_LARGE_VOXEL_DIM;
-    const light_position: Vector3 = solution.debug_light_position;
-
-    var work: LightingWork = .{
-        .solution = solution,
-        .first_light_probe_index = 0,
-        .one_past_last_light_probe_index = 0,
-    };
-
-    {
-        var z: u32 = 0;
-        while (z < large_dimension) : (z += 1) {
-            var y: u32 = 0;
-            while (y < large_dimension) : (y += 1) {
-                var x: u32 = 0;
-                while (x < large_dimension) : (x += 1) {
-                    var light_normal0: Vector3 = .zero();
-                    var light_color0: Color3 = .zero();
-
-                    if (true) {
-                        const voxel_center_position: Vector3 = solution.voxel_min_corner_large.plus(
-                            Vector3.newU(x, y, z).plus(.splat(0.5)).hadamardProduct(solution.voxel_cell_dimension),
-                        );
-
-                        var light_normal: Vector3 = light_position.minus(voxel_center_position);
-                        const light_distance: f32 = light_normal.length();
-                        light_normal = light_normal.normalizeOrZero();
-
-                        var light_distance_falloff: f32 = math.clampf01(1.0 - 0.125 * light_distance);
-
-                        if (true) {
-                            const voxel_center_position4x: V3_4x = .fromVector3(voxel_center_position);
-                            const light_normal4x: V3_4x = .fromVector3(light_normal);
-
-                            const is_test_cast: bool = false;
-
-                            // const is_test_cast: bool =
-                            //     x >= (solution.hot_corner_i.x() + hot_dimension / 2 - 4) and
-                            //     y >= (solution.hot_corner_i.y() + hot_dimension / 2 - 4) and
-                            //     z >= (solution.hot_corner_i.z() + hot_dimension / 2 - 4) and
-                            //     x < (solution.hot_corner_i.x() + hot_dimension / 2 + 4) and
-                            //     y < (solution.hot_corner_i.y() + hot_dimension / 2 + 4) and
-                            //     z < (solution.hot_corner_i.z() + hot_dimension / 2 + 4);
-
-                            // const is_test_cast: bool =
-                            //     x == (solution.hot_corner_i.x() + hot_dimension / 2 + 3) and
-                            //     y == (solution.hot_corner_i.y() + hot_dimension / 2 - 2) and
-                            //     z == (solution.hot_corner_i.z() + hot_dimension / 2 + 2);
-
-                            const cast: RaycastResult = raycast(&work, voxel_center_position4x, light_normal4x, false);
-                            const hit: bool = cast.t_ray[0] < light_distance;
-                            const line_color: Color = if (hit) .new(1, 1, 0, 1) else .new(0, 0, 0, 1);
-                            if (true) {
-                                var cast_position: Vector3 = cast.position.getComponent(0);
-
-                                if (!hit) {
-                                    cast_position = voxel_center_position.plus(light_normal.scaledTo(light_distance));
-                                }
-
-                                if (is_test_cast) {
-                                    pushDebugLine(
-                                        solution,
-                                        voxel_center_position,
-                                        cast_position,
-                                        line_color,
-                                    );
-                                    pushDebugLine(
-                                        solution,
-                                        voxel_center_position,
-                                        voxel_center_position.plus(.new(0, 0, 0.025)),
-                                        .new(0, 1, 1, 1),
-                                    );
-                                    pushDebugLine(
-                                        solution,
-                                        voxel_center_position,
-                                        voxel_center_position.plus(light_normal.scaledTo(0.1)),
-                                        .new(1, 0, 1, 1),
-                                    );
-                                }
-
-                                if (hit) {
-                                    light_distance_falloff = 0;
-                                }
-                            }
-                        }
-
-                        // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
-                        // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
-                        const light_alpha: f32 = math.lerpf(
-                            0.4 * MAX_LIGHT_INTENSITY,
-                            0.75 * MAX_LIGHT_INTENSITY,
-                            light_distance_falloff,
-                        );
-
-                        light_normal0 = light_normal;
-                        light_color0 = Color3.new(1, 1, 1).scaledTo(light_alpha);
-                    } else {
-                        light_normal0 = Vector3.new(1, 1, 1).normalizeOrZero();
-                        light_color0 = .zero();
-
-                        if (((x & 1) ^ (y & 1) ^ (z & 1)) != 0) {
-                            light_color0 = .new(10, 10, 10);
-                        } else {
-                            light_color0 = .new(7, 7, 7);
-                        }
-                    }
-
-                    solution.cells[z][y][x].light_normal[0] = light_normal0;
-                    solution.cells[z][y][x].light_color[0] = light_color0;
-                }
-            }
-        }
-    }
-}
-
 fn inLargeVoxel(solution: *LightingSolution, voxel_index: Vector3i) bool {
     _ = solution;
 
@@ -1317,162 +1180,41 @@ fn inLargeVoxel(solution: *LightingSolution, voxel_index: Vector3i) bool {
     return result;
 }
 
-fn spamVoxelSlice(
-    solution: *LightingSolution,
-    voxel_index: Vector3i,
-    light_position: Vector3,
-    light_color: Color3,
-    light_falloff: f32,
-    is_test_cast: bool,
-) void {
-    if (inLargeVoxel(solution, voxel_index)) {
-        const voxel_center_position: Vector3 = getVoxelCenterPosition(solution, voxel_index);
-
-        if (is_test_cast) {
-            const box_radius: Vector3 = solution.voxel_cell_dimension.scaledTo(0.4);
-            pushDebugBox(
-                solution,
-                voxel_center_position.minus(box_radius),
-                voxel_center_position.plus(box_radius),
-                .new(1, 0.5, 0, 1),
-            );
-        }
-
-        var light_normal: Vector3 = light_position.minus(voxel_center_position);
-        const light_distance: f32 = light_normal.lengthSquared();
-        light_normal = light_normal.normalizeOrZero();
-
-        const light_distance_falloff: f32 = 1.0 - light_falloff * light_distance;
-        // std.debug.assert(light_distance_falloff >= 0);
-
-        // TODO: We should probably have our "darkness" range be quite a bit less than our brightness
-        // range - maybe encode -0.2 to 1.0 instead of -1 to 1.
-        // const light_alpha: f32 = math.lerpf(
-        //     0.4 * MAX_LIGHT_INTENSITY,
-        //     0.75 * MAX_LIGHT_INTENSITY,
-        //     light_distance_falloff,
-        // );
-        const light_alpha: f32 = light_distance_falloff;
-
-        const light_normal0: Vector3 = light_normal;
-        var light_color0: Color3 = light_color.scaledTo(light_alpha);
-        if (false) {
-            _ = light_color0.setR(math.signedSquareRoot(light_color0.r()));
-            _ = light_color0.setG(math.signedSquareRoot(light_color0.g()));
-            _ = light_color0.setB(math.signedSquareRoot(light_color0.b()));
-        }
-
-        const i: Vector3u = .new(@intCast(voxel_index.x()), @intCast(voxel_index.y()), @intCast(voxel_index.z()));
-
-        _ = i;
-        _ = light_normal0;
-        // solution.cells[i.z()][i.y()][i.x()].total_weight += 1;
-        //
-        // solution.cells[i.z()][i.y()][i.x()].light_color_accumulator =
-        //     solution.cells[i.z()][i.y()][i.x()].light_color_accumulator.plus(light_color0);
-        //
-        // solution.cells[i.z()][i.y()][i.x()].light_normal_accumulator =
-        //     solution.cells[i.z()][i.y()][i.x()].light_normal_accumulator.plus(light_normal0);
-    }
-}
-
 fn spamVoxel(
     solution: *LightingSolution,
     spam_position: Vector3,
-    light_position: Vector3,
     light_color: Color3,
-    light_falloff: f32,
+    light_depth: f32,
+    t_offset: Vector2u,
     is_test_cast: bool,
 ) void {
+    _ = is_test_cast;
     const voxel_index: Vector3i = getVoxelIndex(solution, spam_position);
-    // spamVoxelSlice(
-    //     solution,
-    //     voxel_index,
-    //     light_position,
-    //     light_color,
-    //     light_falloff,
-    //     is_test_cast,
-    // );
-
-    if (true) {
-        var dx: i32 = -1;
-        while (dx <= 1) : (dx += 1) {
-            // spamVoxelSlice(
-            //     solution,
-            //     .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z() - 1),
-            //     light_position,
-            //     light_color,
-            //     light_falloff,
-            //     is_test_cast,
-            // );
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z()),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y() - 1, voxel_index.z() + 1),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y(), voxel_index.z() - 1),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y(), voxel_index.z()),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y(), voxel_index.z() + 1),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y() + 1, voxel_index.z() - 1),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y() + 1, voxel_index.z()),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-            spamVoxelSlice(
-                solution,
-                .new(voxel_index.x() + dx, voxel_index.y() + 1, voxel_index.z() + 1),
-                light_position,
-                light_color,
-                light_falloff,
-                is_test_cast,
-            );
-        }
+    if (inLargeVoxel(solution, voxel_index)) {
+        // TODO: For some reason, we are getting a bug here where the attack speed is visibly much faster than the
+        // decay speed but it is not clear why.
+        const i: Vector3u = .new(@intCast(voxel_index.x()), @intCast(voxel_index.y()), @intCast(voxel_index.z()));
+        const cell: *LightVoxelCell = &solution.cells[i.z()][i.y()][i.x()];
+        cell.light_color[t_offset.y()][t_offset.x()] =
+            cell.light_color[t_offset.y()][t_offset.x()].lerp(light_color, solution.t_update_blend);
+        cell.light_depth[t_offset.y()][t_offset.x()] =
+            math.lerpf(cell.light_depth[t_offset.y()][t_offset.x()], light_depth, solution.t_update_blend);
     }
+}
+
+fn getOctahedralOffset(direction: Vector3) Vector2u {
+    var uv: Vector2 = math.octahedralFromUnitVector(direction);
+    uv = uv.plus(.new(1, 1)).scaledTo(0.5);
+
+    const dimension: f32 = @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3);
+
+    const i: Vector2 = uv.scaledTo(dimension).plus(.new(1.5, 1.5));
+    const result: Vector2u = .new(
+        intrinsics.floorReal32ToUInt32(i.x()),
+        intrinsics.floorReal32ToUInt32(i.y()),
+    );
+
+    return result;
 }
 
 fn testCastFromProbes(
@@ -1492,7 +1234,7 @@ fn testCastFromProbes(
 
         // const light_box: *LightingBox = getLightLeafForPosition(solution, cast_position, false);
         const light_position: Vector3 = light_box.position;
-        const light_color: Color3 = Color3.new(1, 1, 1).scaledTo(5);
+        var light_color: Color3 = Color3.new(1, 1, 1);
 
         var cast_direction: Vector3 = light_position.minus(cast_position);
         const t_max: f32 = cast_direction.length();
@@ -1501,15 +1243,15 @@ fn testCastFromProbes(
         const probe_position4x: V3_4x = .fromVector3(cast_position);
         const cast_direction4x: V3_4x = .fromVector3(cast_direction);
 
-        _ = t_max;
         const is_test_cast: bool = false; //t_max < 3;
 
         const cast: RaycastResult = raycast(&work, probe_position4x, cast_direction4x, false);
         const hit_light: bool = cast.emission[0] > 0;
         var line_color: Color = if (hit_light) .new(1, 1, 0, 1) else .new(0, 0, 0, 1);
         const hit_position: Vector3 = cast.position.getComponent(0);
+        const hit_depth: f32 = cast.t_ray[0];
 
-        if (cast.t_ray[0] == std.math.floatMax(f32)) {
+        if (hit_depth == std.math.floatMax(f32)) {
             line_color = .new(1, 0, 0, 1);
         }
 
@@ -1534,9 +1276,22 @@ fn testCastFromProbes(
             );
         }
 
+        var oct_offset = getOctahedralOffset(cast_direction);
+        oct_offset = getOctahedralOffset(.new(0, 0, 1));
         if (hit_light) {
-            spamVoxel(solution, cast_position, light_position, light_color, 0.025, is_test_cast);
+            light_color = light_color.scaledTo(1 - math.clampf01(0.1 * t_max));
+        } else {
+            light_color = .new(0, 0, 0);
         }
+
+        spamVoxel(
+            solution,
+            cast_position,
+            light_color,
+            hit_depth,
+            oct_offset,
+            is_test_cast,
+        );
     }
 }
 
@@ -1600,18 +1355,16 @@ pub fn endLightingComputation(
     // From the linear blend coeeficient t_irradiance_preservation between the two successive frames of irradiance data,
     // we "derive" two coefficients, one for the multiplication at the end that renormalizes, and one for the new ray
     // contributions. This is to avoid pre-multiplying the existing probes in a first pass.
-    const t_irradiance_preservation: f32 = 50.0 / 60.0;
-    solution.irradiance_blend_u = t_irradiance_preservation;
-    solution.irradiance_blend_v = (1 - solution.irradiance_blend_u) / solution.irradiance_blend_u;
+    const t_irradiance_preservation: f32 = 10.0 / 60.0;
+    solution.t_update_blend = t_irradiance_preservation;
 
     // When doing long-term accumulation for testing, we turn off the linear blend and instead just set the
     // coefficients for long-term averaging.
     if (solution.accumulating) {
-        solution.irradiance_blend_u = 1;
         if (solution.accumulation_count < LIGHT_TEST_ACCUMULATION_COUNT) {
-            solution.irradiance_blend_v = 1.0 / @as(f32, @floatFromInt(LIGHT_TEST_ACCUMULATION_COUNT));
+            solution.t_update_blend = 1.0 / @as(f32, @floatFromInt(LIGHT_TEST_ACCUMULATION_COUNT));
         } else {
-            solution.irradiance_blend_v = 0;
+            solution.t_update_blend = 0;
         }
     }
 
@@ -1620,44 +1373,10 @@ pub fn endLightingComputation(
     const light_color: Color3 = .new(1, 1, 1);
 
     buildSpatialPartitionForLighting(solution);
-    if (false) {
+    if (true) {
         computLightPropagation(solution, lighting_queue);
     } else {
         testCastFromProbes(solution);
-    }
-
-    if (false) {
-        var z: u32 = 0;
-        while (z < LIGHT_LARGE_VOXEL_DIM) : (z += 1) {
-            var y: u32 = 0;
-            while (y < LIGHT_LARGE_VOXEL_DIM) : (y += 1) {
-                var x: u32 = 0;
-                while (x < LIGHT_LARGE_VOXEL_DIM) : (x += 1) {
-                    const normalization_coefficient = math.safeRatio0(1, solution.cells[z][y][x].total_weight);
-
-                    const new_light_color: Color3 =
-                        solution.cells[z][y][x].light_color_accumulator.scaledTo(normalization_coefficient);
-                    const new_light_normal: Vector3 =
-                        solution.cells[z][y][x].light_normal_accumulator.scaledTo(normalization_coefficient);
-
-                    solution.cells[z][y][x].light_color[0] =
-                        solution.cells[z][y][x].light_color[0].scaledTo(solution.irradiance_blend_u);
-                    solution.cells[z][y][x].light_normal[0] =
-                        solution.cells[z][y][x].light_normal[0].scaledTo(solution.irradiance_blend_u);
-
-                    solution.cells[z][y][x].light_color[0] =
-                        solution.cells[z][y][x].light_color[0].plus(new_light_color.scaledTo(solution.irradiance_blend_v));
-                    solution.cells[z][y][x].light_normal[0] =
-                        solution.cells[z][y][x].light_normal[0].plus(new_light_normal.scaledTo(solution.irradiance_blend_v));
-
-                    solution.cells[z][y][x].light_normal[0] = solution.cells[z][y][x].light_normal[0].normalizeOrZero();
-
-                    solution.cells[z][y][x].total_weight = 0;
-                    solution.cells[z][y][x].light_color_accumulator = .zero();
-                    solution.cells[z][y][x].light_normal_accumulator = .zero();
-                }
-            }
-        }
     }
 
     if (true) {
@@ -1683,20 +1402,22 @@ pub fn endLightingComputation(
                 while (x < hot_dimension) : (x += 1) {
                     const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
 
-                    if (isInDebugVoxDim(x, hot_dimension) and
-                        isInDebugVoxDim(y, hot_dimension) and
-                        isInDebugVoxDim(z, hot_dimension))
-                    {
-                        const box_radius: Vector3 = Vector3.new(1, 1, 1).scaledTo(0.1);
-                        const box_center_position: Vector3 = solution.voxel_min_corner_hot.plus(
-                            voxel_center_position.hadamardProduct(solution.voxel_cell_dimension),
-                        );
-                        pushDebugBox(
-                            solution,
-                            box_center_position.minus(box_radius),
-                            box_center_position.plus(box_radius),
-                            .new(1, 1, 1, 1),
-                        );
+                    if (false) {
+                        if (isInDebugVoxDim(x, hot_dimension) and
+                            isInDebugVoxDim(y, hot_dimension) and
+                            isInDebugVoxDim(z, hot_dimension))
+                        {
+                            const box_radius: Vector3 = Vector3.new(1, 1, 1).scaledTo(0.1);
+                            const box_center_position: Vector3 = solution.voxel_min_corner_hot.plus(
+                                voxel_center_position.hadamardProduct(solution.voxel_cell_dimension),
+                            );
+                            pushDebugBox(
+                                solution,
+                                box_center_position.minus(box_radius),
+                                box_center_position.plus(box_radius),
+                                .new(1, 1, 1, 1),
+                            );
+                        }
                     }
 
                     var ty: u32 = 1;
@@ -1758,8 +1479,8 @@ pub fn endLightingComputation(
                                 const hot_x: u32 = solution.hot_corner_i.x() + x;
                                 const cell: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
 
-                                light_c = cell.light_color[0];
-                                // light_normal0 = cell.light_normal[0];
+                                light_c = cell.light_color[ty][tx];
+                                light_d = cell.light_depth[ty][tx];
                             }
 
                             const element_index_color: u32 =
