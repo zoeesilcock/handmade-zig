@@ -2425,7 +2425,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     open_gl.optGLDrawArrays.?(GL.GL_TRIANGLE_STRIP, 0, 4);
     useProgramEnd(open_gl, &open_gl.final_stretch);
 
-    if (false) {
+    if (true) {
         open_gl.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.light_map_debug_buffer);
         useProgramBegin(open_gl, &open_gl.final_stretch);
         gl.glBindTexture(GL.GL_TEXTURE_2D, open_gl.light_color_atlas_handle);

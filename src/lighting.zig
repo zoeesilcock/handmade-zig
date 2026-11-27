@@ -80,9 +80,6 @@ pub const MAX_LIGHT_PROBE_COUNT = 2 * 8192;
 pub const MAX_LIGHT_OCCLUDER_COUNT = 2 * 8192;
 pub const MAX_LIGHT_INTENSITY: f32 = 10.0;
 
-const TEST_LIGHT_SPHERE = true;
-const TEST_LIGHT_CHECKERBOARD = false;
-const TEST_LIGHT_TRANSFER = true;
 const TEST_EDGE_COLORING = false;
 
 const SLOW = shared.SLOW;
@@ -136,6 +133,7 @@ pub const LightingSolution = struct {
     hot_y: f32,
     hot_z: f32,
     cells: [LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM][LIGHT_LARGE_VOXEL_DIM]LightVoxelCell,
+    diffuse_weight_map: [LIGHT_COLOR_LOOKUP_SQUARE_DIM][LIGHT_COLOR_LOOKUP_SQUARE_DIM]DiffuseWeightMap,
 
     debug_light_position: Vector3,
 
@@ -164,6 +162,10 @@ const LightNode = struct {
 const LightVoxelCell = struct {
     light_color: [LIGHT_COLOR_LOOKUP_SQUARE_DIM][LIGHT_COLOR_LOOKUP_SQUARE_DIM]Color3 = @splat(@splat(.zero())),
     light_depth: [LIGHT_COLOR_LOOKUP_SQUARE_DIM][LIGHT_COLOR_LOOKUP_SQUARE_DIM]f32 = @splat(@splat(0)),
+};
+
+const DiffuseWeightMap = struct {
+    weights: [LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2][LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2]F32_4x,
 };
 
 const DebugLine = extern struct {
@@ -983,6 +985,30 @@ fn binormalToNormal(normal: Vector3) Vector3 {
     return result;
 }
 
+fn buildDiffuseLightMaps(solution: *LightingSolution) void {
+    var ty: u32 = 1;
+    while (ty < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (ty += 1) {
+        var tx: u32 = 1;
+        while (tx < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (tx += 1) {
+            const outgoing: Vector3 = directionFromTxTy(tx, ty);
+
+            var sy: u32 = 0;
+            while (sy < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2)) : (sy += 1) {
+                var sx: u32 = 0;
+                while (sx < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2)) : (sx += 1) {
+                    const incoming: Vector3 = directionFromTxTy(sx + 1, sy + 1);
+                    const weight: f32 = math.clampf01(outgoing.dotProduct(incoming));
+
+                    const weights: *DiffuseWeightMap = &solution.diffuse_weight_map[ty - 1][(tx - 1) / 4];
+                    var temp: [4]f32 = weights.weights[sy][sx];
+                    temp[@mod(tx - 1, 4)] = weight;
+                    weights.weights[sy][sx] = temp;
+                }
+            }
+        }
+    }
+}
+
 pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena, fundamental_unit: f32) void {
     solution.series = .seed(1234, null, null, null);
     solution.max_work_count = 256;
@@ -994,6 +1020,8 @@ pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena, fundamenta
     solution.inverse_voxel_cell_dimension = solution.voxel_cell_dimension.divideFByMe(1);
 
     solution.update_debug_lines = true;
+
+    buildDiffuseLightMaps(solution);
 }
 
 fn blockCopyVoxel(solution: *LightingSolution, delta_voxel: Vector3i) void {
@@ -1202,6 +1230,17 @@ fn spamVoxel(
     }
 }
 
+fn directionFromTxTy(tx: u32, ty: u32) Vector3 {
+    var o_xy: Vector2 = .new(
+        @as(f32, @floatFromInt(tx - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
+        @as(f32, @floatFromInt(ty - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
+    );
+    o_xy = o_xy.scaledTo(2).minus(.new(1, 1));
+
+    const sample_direction: Vector3 = math.unitVectorFromOctahedral(o_xy);
+    return sample_direction;
+}
+
 fn getOctahedralOffset(direction: Vector3) Vector2u {
     var uv: Vector2 = math.octahedralFromUnitVector(direction);
     uv = uv.plus(.new(1, 1)).scaledTo(0.5);
@@ -1295,6 +1334,93 @@ fn testCastFromProbes(
     }
 }
 
+fn testLightSphere(solution: *LightingSolution, group: *RenderGroup) void {
+    const setup: *RenderSetup = &group.last_setup;
+    const commands: *RenderCommands = group.commands;
+    const hot_dimension: u32 = commands.light_voxel_dimension;
+    const inverse_hot_dimension: Vector3 = Vector3.fromV3u(.splat(hot_dimension)).divideFByMe(1);
+
+    const light_position: Vector3 = solution.debug_light_position;
+    const light_intensity: f32 = 0.1 * MAX_LIGHT_INTENSITY;
+    const light_color: Color3 = .new(1, 1, 1);
+
+    const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
+    const light_uvw: Vector3 =
+        voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
+
+    var z: u32 = 0;
+    while (z < hot_dimension) : (z += 1) {
+        var y: u32 = 0;
+        while (y < hot_dimension) : (y += 1) {
+            var x: u32 = 0;
+            while (x < hot_dimension) : (x += 1) {
+                const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
+
+                if (false) {
+                    if (isInDebugVoxDim(x, hot_dimension) and
+                        isInDebugVoxDim(y, hot_dimension) and
+                        isInDebugVoxDim(z, hot_dimension))
+                    {
+                        const box_radius: Vector3 = Vector3.new(1, 1, 1).scaledTo(0.1);
+                        const box_center_position: Vector3 = solution.voxel_min_corner_hot.plus(
+                            voxel_center_position.hadamardProduct(solution.voxel_cell_dimension),
+                        );
+                        pushDebugBox(
+                            solution,
+                            box_center_position.minus(box_radius),
+                            box_center_position.plus(box_radius),
+                            .new(1, 1, 1, 1),
+                        );
+                    }
+                }
+
+                var ty: u32 = 1;
+                while (ty < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (ty += 1) {
+                    var tx: u32 = 1;
+                    while (tx < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (tx += 1) {
+                        var light_c: Color3 = .zero();
+                        var light_d: f32 = 0;
+                        const sample_direction: Vector3 = directionFromTxTy(tx, ty);
+
+                        if (true) {
+                            const voxel_uvw: Vector3 = inverse_hot_dimension.hadamardProduct(voxel_center_position);
+
+                            {
+                                var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
+                                const light_distance: f32 = light_normal.length();
+                                light_normal = light_normal.normalizeOrZero();
+
+                                var light_alpha: f32 = 1.0 - 3.0 * light_distance;
+                                light_alpha *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
+                                light_alpha = math.clampf01(light_alpha);
+
+                                light_c = light_color.scaledTo(
+                                    light_alpha * math.clampf01(light_normal.dotProduct(sample_direction)),
+                                );
+                                light_d = MAX_LIGHT_DEPTH;
+                            }
+                        } else {
+                            light_c = .new(
+                                if (sample_direction.x() > 0) 1 else 0.1,
+                                if (sample_direction.y() > 0) 1 else 0.1,
+                                if (sample_direction.z() > 0) 1 else 0.1,
+                            );
+                        }
+
+                        const hot_z: u32 = solution.hot_corner_i.z() + z;
+                        const hot_y: u32 = solution.hot_corner_i.y() + y;
+                        const hot_x: u32 = solution.hot_corner_i.x() + x;
+                        const cell: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
+
+                        cell.light_color[ty][tx] = light_c;
+                        cell.light_depth[ty][tx] = light_d;
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn hasLight(cell: *LightVoxelCell) bool {
     return cell.light_color[0].r() != 0 or
         cell.light_color[0].g() != 0 or
@@ -1332,13 +1458,13 @@ pub fn endLightingComputation(
     TimedBlock.beginFunction(@src(), .LightingTest);
     defer TimedBlock.endFunction(@src(), .LightingTest);
 
-    const setup: *RenderSetup = &group.last_setup;
+    // const setup: *RenderSetup = &group.last_setup;
     const commands: *RenderCommands = group.commands;
     const hot_dimension: u32 = commands.light_voxel_dimension;
     const oct_color_dimension: u32 = LIGHT_COLOR_LOOKUP_SQUARE_DIM;
     const oct_depth_dimension: u32 = LIGHT_DEPTH_LOOKUP_SQUARE_DIM;
     // const large_dimension: u32 = LIGHT_LARGE_VOXEL_DIM;
-    const inverse_hot_dimension: Vector3 = Vector3.fromV3u(.splat(hot_dimension)).divideFByMe(1);
+    // const inverse_hot_dimension: Vector3 = Vector3.fromV3u(.splat(hot_dimension)).divideFByMe(1);
 
     solution.light_probe_count = commands.light_probe_count;
     solution.light_probe_position = commands.light_probe_position;
@@ -1368,127 +1494,59 @@ pub fn endLightingComputation(
         }
     }
 
-    const light_position: Vector3 = solution.debug_light_position;
-    const light_intensity: f32 = 0.1 * MAX_LIGHT_INTENSITY;
-    const light_color: Color3 = .new(1, 1, 1);
-
     buildSpatialPartitionForLighting(solution);
-    if (true) {
+    if (false) {
         computLightPropagation(solution, lighting_queue);
     } else {
-        testCastFromProbes(solution);
+        testLightSphere(solution, group);
+        // testCastFromProbes(solution);
     }
 
-    if (true) {
-        const voxel_inverse_total_dimension: Vector3 = setup.voxel_inverse_total_dimension;
-
-        // const light_position2: Vector3 = light_position.plus(.new(0, 8, 0));
-        // const light_position3: Vector3 = light_position.plus(.new(8, 0, 0));
-        // const light_position4: Vector3 = light_position.plus(.new(8, 8, 0));
-        const light_uvw: Vector3 =
-            voxel_inverse_total_dimension.hadamardProduct(light_position.minus(setup.voxel_min_corner));
-        // const light2_uvw: Vector3 =
-        //     voxel_inverse_total_dimension.hadamardProduct(light_position2.minus(setup.voxel_min_corner));
-        // const light3_uvw: Vector3 =
-        //     voxel_inverse_total_dimension.hadamardProduct(light_position3.minus(setup.voxel_min_corner));
-        // const light4_uvw: Vector3 =
-        //     voxel_inverse_total_dimension.hadamardProduct(light_position4.minus(setup.voxel_min_corner));
-
+    {
         var z: u32 = 0;
         while (z < hot_dimension) : (z += 1) {
             var y: u32 = 0;
             while (y < hot_dimension) : (y += 1) {
                 var x: u32 = 0;
                 while (x < hot_dimension) : (x += 1) {
-                    const voxel_center_position: Vector3 = Vector3.newU(x, y, z).plus(.splat(0.5));
-
-                    if (false) {
-                        if (isInDebugVoxDim(x, hot_dimension) and
-                            isInDebugVoxDim(y, hot_dimension) and
-                            isInDebugVoxDim(z, hot_dimension))
-                        {
-                            const box_radius: Vector3 = Vector3.new(1, 1, 1).scaledTo(0.1);
-                            const box_center_position: Vector3 = solution.voxel_min_corner_hot.plus(
-                                voxel_center_position.hadamardProduct(solution.voxel_cell_dimension),
-                            );
-                            pushDebugBox(
-                                solution,
-                                box_center_position.minus(box_radius),
-                                box_center_position.plus(box_radius),
-                                .new(1, 1, 1, 1),
-                            );
-                        }
-                    }
+                    const hot_z: u32 = solution.hot_corner_i.z() + z;
+                    const hot_y: u32 = solution.hot_corner_i.y() + y;
+                    const hot_x: u32 = solution.hot_corner_i.x() + x;
+                    const cell: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
 
                     var ty: u32 = 1;
                     while (ty < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (ty += 1) {
-                        var tx: u32 = 1;
-                        while (tx < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 1)) : (tx += 1) {
-                            var light_c: Color3 = .zero();
-                            var light_d: f32 = 0;
+                        const element_index_color: u32 =
+                            voxelOffset(x, y, z, 1, ty, hot_dimension, oct_color_dimension);
+                        const element_index_depth: u32 =
+                            voxelOffset(x, y, z, 1, ty, hot_dimension, oct_depth_dimension);
 
-                            if (TEST_LIGHT_SPHERE) {
-                                var o_xy: Vector2 = .new(
-                                    @as(f32, @floatFromInt(tx - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
-                                    @as(f32, @floatFromInt(ty - 1)) / @as(f32, @floatFromInt(LIGHT_COLOR_LOOKUP_SQUARE_DIM - 3)),
-                                );
-                                o_xy = o_xy.scaledTo(2).minus(.new(1, 1));
+                        const dest_color: [*]align(1) V3_4x = @ptrCast(&commands.light_voxel_color[element_index_color]);
+                        const dest_depth: [*]align(1) F32_4x = @ptrCast(&commands.light_voxel_depth[element_index_depth]);
 
-                                const sample_direction: Vector3 = math.unitVectorFromOctahedral(o_xy);
+                        var tx4: u32 = 0;
+                        while (tx4 < ((LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2) / 4)) : (tx4 += 1) {
+                            var light_color: V3_4x = .splat(@splat(0));
+                            var light_depth: F32_4x = @splat(0);
+                            const weights: *DiffuseWeightMap = &solution.diffuse_weight_map[ty][tx4];
 
-                                if (true) {
-                                    const voxel_uvw: Vector3 = inverse_hot_dimension.hadamardProduct(voxel_center_position);
-
-                                    {
-                                        var light_normal: Vector3 = light_uvw.minus(voxel_uvw);
-                                        const light_distance: f32 = light_normal.length();
-                                        light_normal = light_normal.normalizeOrZero();
-
-                                        var light_alpha: f32 = 1.0 - 3.0 * light_distance;
-                                        light_alpha *= 6 * light_intensity / MAX_LIGHT_INTENSITY;
-                                        light_alpha = math.clampf01(light_alpha);
-
-                                        light_c = light_color.scaledTo(
-                                            light_alpha * math.clampf01(light_normal.dotProduct(sample_direction)),
+                            var sy: u32 = 0;
+                            while (sy < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2)) : (sy += 1) {
+                                var sx: u32 = 0;
+                                while (sx < (LIGHT_COLOR_LOOKUP_SQUARE_DIM - 2)) : (sx += 1) {
+                                    const weight: F32_4x = weights.weights[sy][sx];
+                                    light_color =
+                                        light_color.plus(
+                                            V3_4x.fromColor3(cell.light_color[sy + 1][sx + 1]).scaledToV(weight),
                                         );
-                                        light_d = MAX_LIGHT_DEPTH;
-                                    }
-                                } else {
-                                    light_c = .new(
-                                        if (sample_direction.x() > 0) 1 else 0.1,
-                                        if (sample_direction.y() > 0) 1 else 0.1,
-                                        if (sample_direction.z() > 0) 1 else 0.1,
-                                    );
+                                    light_depth += weight * @as(F32_4x, @splat(cell.light_depth[sy + 1][sx + 1]));
                                 }
                             }
 
-                            if (TEST_LIGHT_CHECKERBOARD) {
-                                // light_normal0 = Vector3.new(1, 1, 1).normalizeOrZero();
-                                light_c = 0xa0000000;
+                            light_color = light_color.transpose();
 
-                                if (((x & 1) ^ (y & 1) ^ (z & 1)) != 0) {
-                                    light_c |= 0x00ffffff;
-                                } else {
-                                    light_c |= 0x00404040;
-                                }
-                            }
-
-                            if (TEST_LIGHT_TRANSFER) {
-                                const hot_z: u32 = solution.hot_corner_i.z() + z;
-                                const hot_y: u32 = solution.hot_corner_i.y() + y;
-                                const hot_x: u32 = solution.hot_corner_i.x() + x;
-                                const cell: *LightVoxelCell = &solution.cells[hot_z][hot_y][hot_x];
-
-                                light_c = cell.light_color[ty][tx];
-                                light_d = cell.light_depth[ty][tx];
-                            }
-
-                            const element_index_color: u32 =
-                                voxelOffset(x, y, z, tx, ty, hot_dimension, oct_color_dimension);
-                            const element_index_depth: u32 =
-                                voxelOffset(x, y, z, tx, ty, hot_dimension, oct_depth_dimension);
-                            commands.light_voxel_color[element_index_color] = light_c;
-                            commands.light_voxel_depth[element_index_depth] = light_d;
+                            dest_color[tx4] = light_color;
+                            dest_depth[tx4] = light_depth;
                         }
                     }
                 }
@@ -1584,106 +1642,5 @@ pub fn endLightingComputation(
         const line: *DebugLine = &solution.debug_lines[debug_line_index];
 
         group.pushLineSegment(white_texture, line.from_position, line.color, line.to_position, line.color, 0.01);
-    }
-}
-
-fn outputLightingPointsRecurse(
-    group: *RenderGroup,
-    solution: *LightingSolution,
-    box: *LightingBox,
-    depth: u32,
-) void {
-    if (depth == 0 or box.child_count == 0) {
-        const white_texture: RendererTexture = group.white_texture;
-
-        if (false) {
-            var box_surface_index: u32 = 0;
-            while (box_surface_index < 6) : (box_surface_index += 1) {
-                const box_surface: box_mod.LightBoxSurface =
-                    box_mod.getBoxSurface(box.position, box.radius, box_surface_index);
-
-                const point_count: u32 = box.light_index[box_surface_index + 1] - box.light_index[box_surface_index];
-                var size_ratio: f32 = 1.8;
-                if (point_count > 1) {
-                    size_ratio /= @floatFromInt(point_count);
-                }
-                const element_width: f32 = size_ratio * box_surface.half_width;
-                const element_height: f32 = size_ratio * box_surface.half_height;
-
-                var point_index: u32 = box.light_index[box_surface_index];
-                while (point_index < box.light_index[box_surface_index + 1]) : (point_index += 1) {
-                    const point: *LightingPoint = &solution.points[point_index];
-
-                    const position: Vector3 = point.position;
-                    const x_axis: Vector3 = box_surface.x_axis;
-                    const y_axis: Vector3 = box_surface.y_axis;
-
-                    var emission_color: Color3 = solution.accumulated_pps[point_index];
-                    if (box.child_count == 0) {
-                        emission_color = emission_color.plus(solution.emission_pps[point_index]);
-                    }
-
-                    var front_emission_color: Color = emission_color.clamp01().toColor(1);
-
-                    var position0: Vector4 = .zero();
-                    var position1: Vector4 = .zero();
-                    var position2: Vector4 = .zero();
-                    var position3: Vector4 = .zero();
-
-                    var color0: u32 = 0;
-                    var color1: u32 = 0;
-                    var color2: u32 = 0;
-                    var color3: u32 = 0;
-
-                    const x: Vector3 = x_axis.scaledTo(0.5 * element_width);
-                    const y: Vector3 = y_axis.scaledTo(0.5 * element_height);
-
-                    _ = position0.setXYZ(position.minus(x).minus(y));
-                    _ = position1.setXYZ(position.plus(x).minus(y));
-                    _ = position2.setXYZ(position.plus(x).plus(y));
-                    _ = position3.setXYZ(position.minus(x).plus(y));
-
-                    _ = position0.setW(0);
-                    _ = position1.setW(0);
-                    _ = position2.setW(0);
-                    _ = position3.setW(0);
-
-                    const front_emission_color32 = front_emission_color.scaledTo(255.0).packColorRGBA();
-                    color0 = front_emission_color32;
-                    color1 = front_emission_color32;
-                    color2 = front_emission_color32;
-                    color3 = front_emission_color32;
-
-                    const uv: Vector2 = .zero();
-                    group.pushQuad(
-                        white_texture,
-                        position0,
-                        uv,
-                        color0,
-                        position1,
-                        uv,
-                        color1,
-                        position2,
-                        uv,
-                        color2,
-                        position3,
-                        uv,
-                        color3,
-                        null,
-                    );
-                }
-            }
-        } //else {
-    }
-    {
-        var child_index: u32 = 0;
-        while (child_index < box.child_count) : (child_index += 1) {
-            outputLightingPointsRecurse(
-                group,
-                solution,
-                getBox(solution, (box.first_child_index + child_index)),
-                depth - 1,
-            );
-        }
     }
 }

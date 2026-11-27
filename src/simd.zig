@@ -2,6 +2,7 @@ const std = @import("std");
 const math = @import("math.zig");
 
 const Vector3 = math.Vector3;
+const Color3 = math.Color3;
 
 pub const F32_4x = @Vector(4, f32);
 pub const U32_4x = @Vector(4, u32);
@@ -70,6 +71,14 @@ pub const V3_4x = struct {
             .x = @splat(in.x()),
             .y = @splat(in.y()),
             .z = @splat(in.z()),
+        };
+    }
+
+    pub fn fromColor3(in: Color3) V3_4x {
+        return .{
+            .x = @splat(in.r()),
+            .y = @splat(in.g()),
+            .z = @splat(in.b()),
         };
     }
 
@@ -272,7 +281,44 @@ pub const V3_4x = struct {
     pub fn dotProduct(self: V3_4x, other: V3_4x) F32_4x {
         return self.x * other.x + self.y * other.y + self.z * other.z;
     }
+
+    pub fn transpose(self: V3_4x) V3_4x {
+        var x: F32_4x = self.x;
+        var y: F32_4x = self.y;
+        var z: F32_4x = self.z;
+
+        if (false) {
+            x = .{ 0, 3, 6, 9 };
+            y = .{ 1, 4, 7, 10 };
+            z = .{ 2, 5, 8, 11 };
+        }
+
+        const xy = shuffle4x(x, 0, 2, y, 0, 2);
+        const yz = shuffle4x(y, 1, 3, z, 1, 3);
+        const xz = shuffle4x(x, 1, 3, z, 0, 2);
+
+        const result: V3_4x = .{
+            .x = shuffle4x(xy, 0, 2, xz, 2, 0),
+            .y = shuffle4x(yz, 0, 2, xy, 1, 3),
+            .z = shuffle4x(xz, 3, 1, yz, 1, 3),
+        };
+
+        if (false) {
+            const order: [12]f32 = .{
+                result.x[0], result.x[1], result.x[2], result.x[3],
+                result.y[0], result.y[1], result.y[2], result.y[3],
+                result.z[0], result.z[1], result.z[2], result.z[3],
+            };
+            _ = order;
+        }
+
+        return result;
+    }
 };
+
+fn shuffle4x(a: F32_4x, comptime s0: u2, comptime s1: u2, b: F32_4x, comptime s2: u2, comptime s3: u2) F32_4x {
+    return @shuffle(f32, a, b, @Vector(4, i32){ s0, s1, ~@as(i32, s2), ~@as(i32, s3) });
+}
 
 pub const V4_4x = struct {
     r: F32_4x,
